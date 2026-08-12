@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import BottomNav from "@/components/BottomNav";
+import ImageLightbox from "@/components/ImageLightbox";
 
 type Item = {
   id: string;
@@ -23,6 +24,7 @@ export default function MarketplacePage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [lightboxImages, setLightboxImages] = useState<string[] | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -94,14 +96,21 @@ export default function MarketplacePage() {
         <div className="grid grid-cols-2 gap-3">
           {filtered.map((item) => (
             <div key={item.id} className="rounded-xl border border-hub-border bg-hub-card overflow-hidden">
-              <div className="flex h-28 items-center justify-center bg-hub-card2 text-hub-textDim">
+              <button
+                onClick={() =>
+                  item.image_urls &&
+                  item.image_urls.length > 0 &&
+                  setLightboxImages(item.image_urls)
+                }
+                className="flex h-28 w-full items-center justify-center bg-hub-card2 text-hub-textDim"
+              >
                 {item.image_urls && item.image_urls.length > 0 ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={item.image_urls[0]} alt={item.title} className="h-full w-full object-cover" />
                 ) : (
                   <ImagePlaceholderIcon />
                 )}
-              </div>
+              </button>
               <div className="p-3">
                 <p className="text-sm font-medium">{item.title}</p>
                 <div className="mt-1 flex items-center justify-between">
@@ -129,6 +138,14 @@ export default function MarketplacePage() {
       >
         <PlusIcon /> Sell an Item
       </button>
+
+      {lightboxImages && (
+        <ImageLightbox
+          images={lightboxImages}
+          startIndex={0}
+          onClose={() => setLightboxImages(null)}
+        />
+      )}
 
       <BottomNav />
     </main>
