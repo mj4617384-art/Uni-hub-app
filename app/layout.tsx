@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-hub-bg min-h-screen antialiased">
         <div className="mx-auto max-w-md min-h-screen relative">{children}</div>
+        <Script src="https://js.paystack.co/v1/inline.js" strategy="beforeInteractive" />
       </body>
     </html>
   );
