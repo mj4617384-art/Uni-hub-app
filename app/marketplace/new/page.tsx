@@ -12,8 +12,23 @@ export default function NewListingPage() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState("others");
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? []);
+    const combined = [...files, ...selected].slice(0, 5);
+    setFiles(combined);
+    setPreviews(combined.map((f) => URL.createObjectURL(f)));
+  }
+
+  function removeFile(index: number) {
+    const updated = files.filter((_, i) => i !== index);
+    setFiles(updated);
+    setPreviews(updated.map((f) => URL.createObjectURL(f)));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,12 +41,31 @@ export default function NewListingPage() {
       return;
     }
 
+    const imageUrls: string[] = [];
+    for (const file of files) {
+      const ext = file.name.split(".").pop();
+      const path = `${userData.user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("marketplace-images")
+        .upload(path, file);
+      if (uploadError) {
+        setError(uploadError.message);
+        setLoading(false);
+        return;
+      }
+      const { data: publicUrl } = supabase.storage
+        .from("marketplace-images")
+        .getPublicUrl(path);
+      imageUrls.push(publicUrl.publicUrl);
+    }
+
     const { error } = await supabase.from("marketplace_items").insert({
       seller_id: userData.user.id,
       title,
       description,
       price: Number(price),
       category,
+      image_urls: imageUrls,
     });
 
     setLoading(false);
@@ -43,7 +77,7 @@ export default function NewListingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-hub-bg px-5 pt-5">
+    <main className="min-h-screen bg-hub-bg px-5 pt-5 pb-10">
       <button onClick={() => router.back()} aria-label="Back" className="mb-4">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
           <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -54,6 +88,38 @@ export default function NewListingPage() {
       <p className="mt-1 text-sm text-hub-textDim">List something for other students to buy.</p>
 
       <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+        <div className="text-sm">
+          <span className="mb-1.5 block text-hub-textDim">Photos ({files.length}/5)</span>
+          <div className="flex flex-wrap gap-3">
+            {previews.map((src, i) => (
+              <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-hub-border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-xs text-white"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {files.length < 5 && (
+              <label className="flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-hub-border text-hub-textDim">
+                <span className="text-xl leading-none">+</span>
+                <span className="text-[10px]">Add</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
+        </div>
+
         <label className="text-sm">
           <span className="mb-1.5 block text-hub-textDim">Title</span>
           <input
