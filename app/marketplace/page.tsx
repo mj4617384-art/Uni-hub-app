@@ -10,7 +10,8 @@ type Item = {
   title: string;
   price: number;
   category: string;
-  image_url: string | null;
+  image_urls: string[] | null;
+  seller_id: string;
 };
 
 const categories = ["All", "Electronics", "Books", "Fashion", "Others"];
@@ -18,15 +19,19 @@ const categories = ["All", "Electronics", "Books", "Fashion", "Others"];
 export default function MarketplacePage() {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
   useEffect(() => {
     async function load() {
+      const { data: userData } = await supabase.auth.getUser();
+      setUserId(userData.user?.id ?? null);
+
       const { data } = await supabase
         .from("marketplace_items")
-        .select("id, title, price, category, image_url")
+        .select("id, title, price, category, image_urls, seller_id")
         .eq("status", "available")
         .order("created_at", { ascending: false });
       setItems(data ?? []);
@@ -90,18 +95,28 @@ export default function MarketplacePage() {
           {filtered.map((item) => (
             <div key={item.id} className="rounded-xl border border-hub-border bg-hub-card overflow-hidden">
               <div className="flex h-28 items-center justify-center bg-hub-card2 text-hub-textDim">
-                {item.image_url ? (
+                {item.image_urls && item.image_urls.length > 0 ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={item.image_url} alt={item.title} className="h-full w-full object-cover" />
+                  <img src={item.image_urls[0]} alt={item.title} className="h-full w-full object-cover" />
                 ) : (
                   <ImagePlaceholderIcon />
                 )}
               </div>
               <div className="p-3">
                 <p className="text-sm font-medium">{item.title}</p>
-                <p className="mt-1 text-sm font-semibold text-hub-accentLight">
-                  ₦{Number(item.price).toLocaleString()}
-                </p>
+                <div className="mt-1 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-hub-accentLight">
+                    ₦{Number(item.price).toLocaleString()}
+                  </p>
+                  {userId === item.seller_id && (
+                    <button
+                      onClick={() => router.push(`/marketplace/${item.id}/edit`)}
+                      className="text-xs text-hub-accentLight underline"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
