@@ -4,19 +4,41 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
+declare global {
+  interface Window {
+    PaystackPop: {
+      setup: (options: {
+        key: string;
+        email: string;
+        amount: number;
+        currency: string;
+        ref: string;
+        onClose: () => void;
+        callback: (response: { reference: string }) => void;
+      }) => { openIframe: () => void };
+    };
+  }
+}
+
 export default function AddMoneyPage() {
   const router = useRouter();
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handlePay(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (!window.PaystackPop) {
+      setError("Payment system is still loading — try again in a moment.");
+      return;
+    }
+
     setLoading(true);
 
     const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
+    if (!userData.user || !userData.user.email) {
       router.push("/auth");
       return;
     }
@@ -33,18 +55,34 @@ export default function AddMoneyPage() {
       return;
     }
 
-    const { error } = await supabase.rpc("add_money", {
-      p_wallet_id: wallet.id,
-      p_amount: Number(amount),
-      p_description: "Manual top-up",
+    const handler = window.PaystackPop.setup({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY as string,
+      email: userData.user.email,
+      amount: Number(amount) * 100, // Paystack expects kobo
+      currency: "NGN",
+      ref: `uni-hub-${Date.now()}`,
+      onClose: () => {
+        setLoading(false);
+      },
+      callback: (response) => {
+        (async () => {
+          const res = await fetch("/api/verify-payment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reference: response.reference, walletId: wallet.id }),
+          });
+          const result = await res.json();
+          setLoading(false);
+          if (!res.ok) {
+            setError(result.error || "Payment verification failed.");
+            return;
+          }
+          router.push("/wallet");
+        })();
+      },
     });
 
-    setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
-    router.push("/wallet");
+    handler.openIframe();
   }
 
   return (
@@ -57,16 +95,16 @@ export default function AddMoneyPage() {
 
       <h1 className="text-xl font-semibold">Add Money</h1>
       <p className="mt-1 text-sm text-hub-textDim">
-        Note: this is a test top-up — no real payment is processed yet.
+        Fund your wallet securely via card, bank transfer, or USSD.
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
+      <form onSubmit={handlePay} className="mt-6 flex flex-col gap-4">
         <label className="text-sm">
           <span className="mb-1.5 block text-hub-textDim">Amount (₦)</span>
           <input
             required
             type="number"
-            min="1"
+            min="100"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="5000"
@@ -81,7 +119,7 @@ export default function AddMoneyPage() {
           disabled={loading}
           className="mt-2 rounded-xl bg-hub-accent py-3.5 text-center font-medium text-white disabled:opacity-60"
         >
-          {loading ? "Adding..." : "Add Money"}
+          {loading ? "Processing..." : "Proceed to Pay"}
         </button>
       </form>
     </main>
