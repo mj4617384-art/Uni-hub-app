@@ -11,19 +11,24 @@ type Errand = {
   description: string | null;
   price: number;
   status: string;
+  requester_id: string;
 };
 
 export default function ErrandsPage() {
   const router = useRouter();
   const [errands, setErrands] = useState<Errand[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function load() {
+      const { data: userData } = await supabase.auth.getUser();
+      setUserId(userData.user?.id ?? null);
+
       const { data } = await supabase
         .from("errands")
-        .select("id, title, description, price, status")
+        .select("id, title, description, price, status, requester_id")
         .eq("status", "open")
         .order("created_at", { ascending: false });
       setErrands(data ?? []);
@@ -80,9 +85,19 @@ export default function ErrandsPage() {
                   <p className="mt-0.5 text-xs text-hub-textDim">{e.description}</p>
                 )}
               </div>
-              <span className="text-sm font-semibold text-hub-accentLight">
-                ₦{Number(e.price).toLocaleString()}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-semibold text-hub-accentLight">
+                  ₦{Number(e.price).toLocaleString()}
+                </span>
+                {userId === e.requester_id && (
+                  <button
+                    onClick={() => router.push(`/errands/${e.id}/edit`)}
+                    className="text-xs text-hub-accentLight underline"
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
