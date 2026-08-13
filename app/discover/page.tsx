@@ -41,6 +41,15 @@ type SportsUpdate = {
   first_name?: string;
 };
 
+type SportsComment = {
+  id: string;
+  sports_update_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  first_name?: string;
+};
+
 const REACTIONS: { type: ReactionType; emoji: string | null; label: string; bg: string }[] = [
   { type: "like", emoji: null, label: "Like", bg: "bg-hub-accentLight" },
   { type: "love", emoji: "❤️", label: "Love", bg: "bg-red-500" },
@@ -163,6 +172,12 @@ export default function DiscoverPage() {
   const [sportsUploadError, setSportsUploadError] = useState<string | null>(null);
   const sportsImageInputRef = useRef<HTMLInputElement>(null);
   const sportsCategoryScopeRef = useRef<HTMLDivElement | null>(null);
+  const [sportsLikes, setSportsLikes] = useState<Record<string, { count: number; mine: boolean }>>({});
+  const [sportsCommentsByUpdate, setSportsCommentsByUpdate] = useState<Record<string, SportsComment[]>>({});
+  const [sportsCommentOpenFor, setSportsCommentOpenFor] = useState<string | null>(null);
+  const [sportsCommentDraft, setSportsCommentDraft] = useState<Record<string, string>>({});
+  const [sportsCommentPosting, setSportsCommentPosting] = useState<string | null>(null);
+  const sportsCommentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Click-outside scopes for reaction popup + post menu
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -581,6 +596,115 @@ export default function DiscoverPage() {
       first_name: s.profiles?.first_name ?? "Student",
     }));
     setSportsUpdates(mapped);
+
+    const ids = mapped.map((s) => s.id);
+    if (ids.length > 0) {
+      await Promise.all([loadSportsLikes(ids), loadSportsCommentsFor(ids)]);
+    }
+  }
+
+  async function loadSportsLikes(updateIds: string[]) {
+    const { data, error } = await supabase
+      .from("sports_update_likes")
+      .select("sports_update_id, user_id")
+      .in("sports_update_id", updateIds);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setSportsLikes((prev) => {
+      const next = { ...prev };
+      updateIds.forEach((id) => {
+        next[id] = { count: 0, mine: false };
+      });
+      (data ?? []).forEach((row: any) => {
+        if (!next[row.sports_update_id]) next[row.sports_update_id] = { count: 0, mine: false };
+        next[row.sports_update_id].count += 1;
+        if (row.user_id === userId) next[row.sports_update_id].mine = true;
+      });
+      return next;
+    });
+  }
+
+  async function toggleSportsLike(updateId: string) {
+    if (!userId) return;
+    const current = sportsLikes[updateId] || { count: 0, mine: false };
+
+    if (current.mine) {
+      setSportsLikes((prev) => ({ ...prev, [updateId]: { count: Math.max(0, current.count - 1), mine: false } }));
+      const { error } = await supabase
+        .from("sports_update_likes")
+        .delete()
+        .eq("sports_update_id", updateId)
+        .eq("user_id", userId);
+      if (error) {
+        setSportsLikes((prev) => ({ ...prev, [updateId]: current }));
+        alert("Unlike failed: " + error.message);
+      }
+    } else {
+      setSportsLikes((prev) => ({ ...prev, [updateId]: { count: current.count + 1, mine: true } }));
+      const { error } = await supabase
+        .from("sports_update_likes")
+        .insert({ sports_update_id: updateId, user_id: userId });
+      if (error) {
+        setSportsLikes((prev) => ({ ...prev, [updateId]: current }));
+        alert("Like failed: " + error.message);
+      }
+    }
+  }
+
+  async function loadSportsCommentsFor(updateIds: string[]) {
+    const { data, error } = await supabase
+      .from("sports_update_comments")
+      .select("*, profiles(first_name)")
+      .in("sports_update_id", updateIds)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const grouped: Record<string, SportsComment[]> = {};
+    (data ?? []).forEach((c: any) => {
+      if (!grouped[c.sports_update_id]) grouped[c.sports_update_id] = [];
+      grouped[c.sports_update_id].push({ ...c, first_name: c.profiles?.first_name ?? "Student" });
+    });
+    setSportsCommentsByUpdate((prev) => ({ ...prev, ...grouped }));
+  }
+
+  async function refreshSportsCommentsForUpdate(updateId: string) {
+    const { data, error } = await supabase
+      .from("sports_update_comments")
+      .select("*, profiles(first_name)")
+      .eq("sports_update_id", updateId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const mapped = (data ?? []).map((c: any) => ({ ...c, first_name: c.profiles?.first_name ?? "Student" }));
+    setSportsCommentsByUpdate((prev) => ({ ...prev, [updateId]: mapped }));
+  }
+
+  async function submitSportsComment(updateId: string) {
+    if (!userId) return;
+    const text = (sportsCommentDraft[updateId] || "").trim();
+    if (!text) return;
+
+    setSportsCommentPosting(updateId);
+    const { error } = await supabase.from("sports_update_comments").insert({
+      sports_update_id: updateId,
+      user_id: userId,
+      content: text,
+    });
+    setSportsCommentPosting(null);
+
+    if (error) {
+      alert("Comment failed: " + error.message);
+      return;
+    }
+
+    setSportsCommentDraft((prev) => ({ ...prev, [updateId]: "" }));
+    await refreshSportsCommentsForUpdate(updateId);
   }
 
   function filteredCategorySuggestions() {
@@ -789,22 +913,21 @@ export default function DiscoverPage() {
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-medium text-white">Trending Sports</h2>
               </div>
-              <div className="relative mt-2 -mx-5 overflow-hidden">
-                {trendingSportsUpdate.image_url ? (
-                  <img src={trendingSportsUpdate.image_url} alt={trendingSportsUpdate.title} className="block h-48 w-full object-cover" />
-                ) : (
-                  <div className="h-48 w-full bg-hub-card2" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
-                <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <span className="inline-block rounded-md bg-hub-accentLight px-2 py-0.5 text-[10px] font-medium text-white">
-                    {trendingSportsUpdate.category}
-                  </span>
-                  <p className="mt-1.5 text-base font-semibold text-white">{trendingSportsUpdate.title}</p>
-                  {trendingSportsUpdate.description && (
-                    <p className="mt-0.5 text-xs text-white/80 line-clamp-2">{trendingSportsUpdate.description}</p>
-                  )}
-                </div>
+              <div className="mt-2">
+                <SportsCard
+                  update={trendingSportsUpdate}
+                  liked={!!sportsLikes[trendingSportsUpdate.id]?.mine}
+                  likeCount={sportsLikes[trendingSportsUpdate.id]?.count ?? 0}
+                  comments={sportsCommentsByUpdate[trendingSportsUpdate.id] || []}
+                  commentsOpen={sportsCommentOpenFor === trendingSportsUpdate.id}
+                  commentDraft={sportsCommentDraft[trendingSportsUpdate.id] || ""}
+                  commentPosting={sportsCommentPosting === trendingSportsUpdate.id}
+                  onLike={() => toggleSportsLike(trendingSportsUpdate.id)}
+                  onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === trendingSportsUpdate.id ? null : trendingSportsUpdate.id)}
+                  onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [trendingSportsUpdate.id]: v }))}
+                  onSubmitComment={() => submitSportsComment(trendingSportsUpdate.id)}
+                  inputRef={(el) => { sportsCommentInputRefs.current[trendingSportsUpdate.id] = el; }}
+                />
               </div>
             </div>
           )}
@@ -816,22 +939,23 @@ export default function DiscoverPage() {
             {!sportsLoading && sportsUpdates.length === 0 && (
               <p className="mt-2 text-xs text-hub-textDim">No sports updates yet — be the first to share one!</p>
             )}
-            <div className="mt-2 flex flex-col gap-3">
+            <div className="mt-2 flex flex-col gap-4">
               {sportsUpdates.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-2.5">
-                  {s.image_url ? (
-                    <img src={s.image_url} alt={s.title} className="h-14 w-14 shrink-0 rounded-lg object-cover" />
-                  ) : (
-                    <div className="h-14 w-14 shrink-0 rounded-lg bg-hub-card2" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-white">{s.title}</p>
-                    <p className="text-xs text-hub-textDim">{timeAgo(s.created_at)} · {s.first_name}</p>
-                  </div>
-                  <span className="shrink-0 rounded-md bg-hub-card2 px-2 py-0.5 text-[10px] text-hub-accentLight">
-                    {s.category}
-                  </span>
-                </div>
+                <SportsCard
+                  key={s.id}
+                  update={s}
+                  liked={!!sportsLikes[s.id]?.mine}
+                  likeCount={sportsLikes[s.id]?.count ?? 0}
+                  comments={sportsCommentsByUpdate[s.id] || []}
+                  commentsOpen={sportsCommentOpenFor === s.id}
+                  commentDraft={sportsCommentDraft[s.id] || ""}
+                  commentPosting={sportsCommentPosting === s.id}
+                  onLike={() => toggleSportsLike(s.id)}
+                  onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === s.id ? null : s.id)}
+                  onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [s.id]: v }))}
+                  onSubmitComment={() => submitSportsComment(s.id)}
+                  inputRef={(el) => { sportsCommentInputRefs.current[s.id] = el; }}
+                />
               ))}
             </div>
           </div>
@@ -1114,6 +1238,111 @@ function CommentRow({
           <button onClick={onReply} className="font-semibold text-hub-textDim">Reply</button>
           <span className="text-hub-textDim">{timeAgo(comment.created_at)}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SportsCard({
+  update,
+  liked,
+  likeCount,
+  comments,
+  commentsOpen,
+  commentDraft,
+  commentPosting,
+  onLike,
+  onToggleComments,
+  onDraftChange,
+  onSubmitComment,
+  inputRef,
+}: {
+  update: SportsUpdate;
+  liked: boolean;
+  likeCount: number;
+  comments: SportsComment[];
+  commentsOpen: boolean;
+  commentDraft: string;
+  commentPosting: boolean;
+  onLike: () => void;
+  onToggleComments: () => void;
+  onDraftChange: (v: string) => void;
+  onSubmitComment: () => void;
+  inputRef: (el: HTMLInputElement | null) => void;
+}) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-hub-border bg-hub-card">
+      {update.image_url ? (
+        <img src={update.image_url} alt={update.title} className="block h-48 w-full object-cover" />
+      ) : (
+        <div className="h-32 w-full bg-hub-card2" />
+      )}
+
+      <div className="p-3">
+        <span className="inline-block rounded-md bg-hub-accentLight px-2 py-0.5 text-[10px] font-medium text-white">
+          {update.category}
+        </span>
+        <p className="mt-1.5 text-sm font-semibold text-white">{update.title}</p>
+        {update.description && (
+          <p className="mt-1 text-xs text-white/80 whitespace-pre-wrap">{update.description}</p>
+        )}
+
+        <div className="mt-3 flex items-center gap-2">
+          <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
+            {update.first_name?.charAt(0).toUpperCase() ?? "U"}
+          </div>
+          <p className="text-xs text-hub-textDim">{update.first_name} · {timeAgo(update.created_at)}</p>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+          <div className="flex items-center gap-5">
+            <button onClick={onLike} className={`flex items-center gap-1.5 text-xs ${liked ? "text-hub-accentLight" : "text-hub-textDim"}`}>
+              <ThumbsUpIcon className={liked ? "text-hub-accentLight" : "text-hub-textDim"} filled={liked} />
+              {likeCount > 0 && <span>{likeCount}</span>}
+            </button>
+            <button onClick={onToggleComments} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+              <CommentIcon />
+              {comments.length > 0 && <span>{comments.length}</span>}
+            </button>
+          </div>
+          <BookmarkIcon filled={false} />
+        </div>
+
+        {commentsOpen && (
+          <div className="mt-3 border-t border-hub-border pt-3">
+            <div className="flex flex-col gap-3 max-h-72 overflow-y-auto">
+              {comments.length === 0 && <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>}
+              {comments.map((c) => (
+                <div key={c.id} className="flex items-start gap-2">
+                  <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
+                    {c.first_name?.charAt(0).toUpperCase() ?? "U"}
+                  </div>
+                  <div className="flex-1 rounded-lg bg-hub-card2 px-2.5 py-1.5">
+                    <p className="text-[11px] font-medium text-white">{c.first_name}</p>
+                    <p className="text-xs text-white/90 whitespace-pre-wrap">{linkifyContent(c.content)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                ref={inputRef}
+                value={commentDraft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") onSubmitComment(); }}
+                placeholder="Write a comment..."
+                className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+              />
+              <button
+                onClick={onSubmitComment}
+                disabled={commentPosting || !commentDraft.trim()}
+                className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40"
+              >
+                {commentPosting ? "..." : "Send"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
