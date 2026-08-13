@@ -23,6 +23,9 @@ const services: Service[] = [
 
 const trendingTags = ["#Freshers2026", "#ExamsSZN", "#HostelLife", "#CampusVibes"];
 
+const CAMPUS_GATE_IMAGE_URL =
+  "https://lrzsycbqaxhmikvddese.supabase.co/storage/v1/object/public/marketplace-images/IMG-20260813-WA0037(2).jpg";
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 12) return "Good morning";
@@ -82,13 +85,20 @@ export default function HomePage() {
       </div>
 
       {/* Greeting card */}
-      <div className="mx-5 mt-5 overflow-hidden rounded-2xl bg-gradient-to-br from-[#16244a] to-hub-card p-5">
-        <p className="text-lg font-medium">
-          {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
-        </p>
-        <p className="mt-1 text-sm text-hub-textDim">
-          Here&apos;s what&apos;s happening around your campus.
-        </p>
+      <div
+        className="relative mx-5 mt-5 overflow-hidden rounded-2xl p-5 bg-cover bg-center"
+        style={{ backgroundImage: `url(${CAMPUS_GATE_IMAGE_URL})` }}
+      >
+        {/* Dark overlay for text readability */}
+        <div className="absolute inset-0 bg-gradient-to-br from-black/70 via-black/50 to-black/30" />
+        <div className="relative">
+          <p className="text-lg font-medium text-white">
+            {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
+          </p>
+          <p className="mt-1 text-sm text-white/80">
+            Here&apos;s what&apos;s happening around your campus.
+          </p>
+        </div>
       </div>
 
       {/* Campus Services grid */}
