@@ -23,6 +23,13 @@ const services: Service[] = [
 
 const trendingTags = ["#Freshers2026", "#ExamsSZN", "#HostelLife", "#CampusVibes"];
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [firstName, setFirstName] = useState<string | null>(null);
@@ -77,7 +84,7 @@ export default function HomePage() {
       {/* Greeting card */}
       <div className="mx-5 mt-5 overflow-hidden rounded-2xl bg-gradient-to-br from-[#16244a] to-hub-card p-5">
         <p className="text-lg font-medium">
-          Good morning{firstName ? `, ${firstName}` : ""} 👋
+          {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
         </p>
         <p className="mt-1 text-sm text-hub-textDim">
           Here&apos;s what&apos;s happening around your campus.
