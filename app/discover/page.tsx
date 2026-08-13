@@ -30,17 +30,41 @@ type Comment = {
   first_name?: string;
 };
 
-const REACTIONS: { type: ReactionType; emoji: string | null; label: string; color: string }[] = [
-  { type: "like", emoji: null, label: "Like", color: "text-hub-accentLight" },
-  { type: "love", emoji: "❤️", label: "Love", color: "text-red-400" },
-  { type: "care", emoji: "🥰", label: "Care", color: "text-yellow-400" },
-  { type: "haha", emoji: "😆", label: "Haha", color: "text-yellow-400" },
-  { type: "wow", emoji: "😮", label: "Wow", color: "text-yellow-400" },
-  { type: "sad", emoji: "😢", label: "Sad", color: "text-yellow-400" },
-  { type: "angry", emoji: "😠", label: "Angry", color: "text-orange-500" },
+const REACTIONS: { type: ReactionType; emoji: string | null; label: string; bg: string }[] = [
+  { type: "like", emoji: null, label: "Like", bg: "bg-hub-accentLight" },
+  { type: "love", emoji: "❤️", label: "Love", bg: "bg-red-500" },
+  { type: "care", emoji: "🥰", label: "Care", bg: "bg-yellow-400" },
+  { type: "haha", emoji: "😆", label: "Haha", bg: "bg-yellow-400" },
+  { type: "wow", emoji: "😮", label: "Wow", bg: "bg-yellow-400" },
+  { type: "sad", emoji: "😢", label: "Sad", bg: "bg-yellow-400" },
+  { type: "angry", emoji: "😠", label: "Angry", bg: "bg-orange-500" },
 ];
+const REACTION_TOP = REACTIONS.slice(0, 3);
+const REACTION_BOTTOM = REACTIONS.slice(3);
 
 const tabs = ["For You", "Following", "Sports", "News", "Clubs"];
+
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+function linkifyContent(text: string) {
+  const parts = text.split(URL_REGEX);
+  return parts.map((part, i) =>
+    URL_REGEX.test(part) ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="text-hub-accentLight underline break-all"
+      >
+        {part}
+      </a>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
 
 function extractHashtags(text: string): string[] {
   const matches = text.match(/#[a-zA-Z0-9_]+/g);
@@ -528,7 +552,6 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {/* Feed — edge-to-edge, no gaps, no rounded cards, hairline dividers only */}
       <div className="mt-4">
         {activeTab !== "For You" && (
           <p className="px-5 text-center text-sm text-hub-textDim">{activeTab} isn&apos;t live yet — check back soon.</p>
@@ -613,7 +636,9 @@ export default function DiscoverPage() {
                 </div>
               )}
 
-              {post.content && <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{post.content}</p>}
+              {post.content && (
+                <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(post.content)}</p>
+              )}
 
               {post.image_url && (
                 <div className="-mx-4 mt-3 overflow-hidden">
@@ -630,25 +655,44 @@ export default function DiscoverPage() {
 
               <div className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
                 {reactionPickerFor === post.id && (
-                  <div className="absolute bottom-full left-0 z-20 mb-2 flex items-center gap-1 rounded-full border border-hub-border bg-hub-card2 px-2 py-1.5 shadow-lg">
-                    {REACTIONS.map((r) => (
-                      <button
-                        key={r.type}
-                        onClick={() => pickReaction(post.id, r.type)}
-                        disabled={reactingId === post.id}
-                        className={`flex items-center justify-center leading-none transition-transform active:scale-125 ${myReaction === r.type ? "scale-110" : ""}`}
-                        aria-label={r.label}
-                      >
-                        {r.type === "like" ? <ThumbsUpIcon className="text-hub-accentLight" /> : <span className="text-lg">{r.emoji}</span>}
-                      </button>
-                    ))}
+                  <div className="absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 rounded-2xl border border-hub-border bg-hub-card2 px-4 py-3 shadow-xl">
+                    <div className="flex items-start gap-4">
+                      {REACTION_TOP.map((r) => (
+                        <button
+                          key={r.type}
+                          onClick={() => pickReaction(post.id, r.type)}
+                          disabled={reactingId === post.id}
+                          className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}
+                        >
+                          <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                            {r.type === "like" ? <ThumbsUpIcon className="text-white" filled /> : <span className="text-lg leading-none">{r.emoji}</span>}
+                          </span>
+                          <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex items-start gap-4">
+                      {REACTION_BOTTOM.map((r) => (
+                        <button
+                          key={r.type}
+                          onClick={() => pickReaction(post.id, r.type)}
+                          disabled={reactingId === post.id}
+                          className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}
+                        >
+                          <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                            <span className="text-lg leading-none">{r.emoji}</span>
+                          </span>
+                          <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 <div className="flex items-center gap-6">
                   <button
                     onClick={() => toggleReactionButton(post.id)}
-                    className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? activeReactionInfo.color : "text-hub-textDim"}`}
+                    className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? "text-hub-accentLight" : "text-hub-textDim"}`}
                   >
                     {activeReactionInfo ? (
                       activeReactionInfo.type === "like" ? <ThumbsUpIcon className="text-hub-accentLight" filled /> : <span className="text-base leading-none">{activeReactionInfo.emoji}</span>
@@ -757,7 +801,7 @@ function CommentRow({
       <div className="flex-1">
         <div className="relative inline-block rounded-lg bg-hub-card2 px-2.5 py-1.5">
           <p className="text-[11px] font-medium text-white">{comment.first_name}</p>
-          <p className="text-xs text-white/90 whitespace-pre-wrap">{comment.content}</p>
+          <p className="text-xs text-white/90 whitespace-pre-wrap">{linkifyContent(comment.content)}</p>
           {likeCount > 0 && (
             <span className="absolute -bottom-1.5 -right-1.5 flex items-center gap-0.5 rounded-full border border-hub-border bg-hub-card px-1 py-0.5 text-[9px] text-hub-textDim">
               <ThumbsUpIcon className="text-hub-accentLight" filled small />
