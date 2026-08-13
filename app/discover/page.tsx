@@ -43,7 +43,6 @@ const REACTION_TOP = REACTIONS.slice(0, 3);
 const REACTION_BOTTOM = REACTIONS.slice(3);
 
 const tabs = ["For You", "Following", "Sports", "News", "Clubs"];
-
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 function linkifyContent(text: string) {
@@ -126,6 +125,48 @@ export default function DiscoverPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+
+  // Click-outside scopes for reaction popup + post menu
+  const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Shared IntersectionObserver — auto-pauses any video that scrolls out of view
+  const videoObserverRef = useRef<IntersectionObserver | null>(null);
+
+  useEffect(() => {
+    videoObserverRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const video = entry.target as HTMLVideoElement;
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.5) {
+            video.pause();
+          }
+        });
+      },
+      { threshold: [0, 0.5, 1] }
+    );
+    return () => videoObserverRef.current?.disconnect();
+  }, []);
+
+  function registerVideoRef(el: HTMLVideoElement | null) {
+    if (el) videoObserverRef.current?.observe(el);
+  }
+
+  // Close reaction popup / post menu when tapping anywhere outside them
+  useEffect(() => {
+    function handleDocClick(e: MouseEvent) {
+      if (reactionPickerFor) {
+        const scope = reactionScopeRefs.current[reactionPickerFor];
+        if (scope && !scope.contains(e.target as Node)) setReactionPickerFor(null);
+      }
+      if (menuOpenFor) {
+        const scope = menuScopeRefs.current[menuOpenFor];
+        if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [reactionPickerFor, menuOpenFor]);
 
   useEffect(() => {
     async function init() {
@@ -573,68 +614,70 @@ export default function DiscoverPage() {
 
           return (
             <div key={post.id} className="relative border-b border-hub-border bg-hub-card px-4 py-3">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-                    {post.first_name?.charAt(0).toUpperCase() ?? "U"}
+              <div ref={(el) => { menuScopeRefs.current[post.id] = el; }} className="relative">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+                      {post.first_name?.charAt(0).toUpperCase() ?? "U"}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-white">{post.first_name}</p>
+                      <p className="text-xs text-hub-textDim">
+                        {timeAgo(post.created_at)}{post.department ? ` · ${post.department}` : ""}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">{post.first_name}</p>
-                    <p className="text-xs text-hub-textDim">
-                      {timeAgo(post.created_at)}{post.department ? ` · ${post.department}` : ""}
-                    </p>
-                  </div>
+                  <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} className="shrink-0 text-hub-textDim px-1">
+                    <MoreIcon />
+                  </button>
                 </div>
-                <button onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)} className="shrink-0 text-hub-textDim px-1">
-                  <MoreIcon />
-                </button>
-              </div>
 
-              {menuOpenFor === post.id && (
-                <div className="absolute right-4 top-12 z-20 w-56 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-                  <button onClick={() => setInterest(post.id, "interested")} className="flex w-full items-start gap-3 px-3 py-2 text-left">
-                    <PlusCircleIcon />
-                    <span>
-                      <span className="block text-xs font-medium text-white">{interestState[post.id] === "interested" ? "Marked Interested" : "Interested"}</span>
-                      <span className="block text-[10px] text-hub-textDim">More posts like this</span>
-                    </span>
-                  </button>
-                  <button onClick={() => setInterest(post.id, "not_interested")} className="flex w-full items-start gap-3 px-3 py-2 text-left">
-                    <MinusCircleIcon />
-                    <span>
-                      <span className="block text-xs font-medium text-white">{interestState[post.id] === "not_interested" ? "Marked Not interested" : "Not interested"}</span>
-                      <span className="block text-[10px] text-hub-textDim">Fewer posts like this</span>
-                    </span>
-                  </button>
-                  <div className="my-1 border-t border-hub-border" />
-                  <button onClick={() => toggleBookmark(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <BookmarkIcon filled={!!bookmarked[post.id]} />{bookmarked[post.id] ? "Saved" : "Save post"}
-                  </button>
-                  <button onClick={() => sharePost(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <ShareIcon />Share
-                  </button>
-                  <button onClick={() => hidePost(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <EyeOffIcon />I don&apos;t want to see this
-                  </button>
-                  <button onClick={reportPost} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <FlagIcon />Report post
-                  </button>
-                  <button onClick={() => toggleNotify(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <BellSmallIcon />{notifyOn[post.id] ? "Turn off notifications" : "Turn on notifications"}
-                  </button>
-                  <button onClick={() => copyLink(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
-                    <LinkIcon />Copy link
-                  </button>
-                  {isMine && (
-                    <>
-                      <div className="my-1 border-t border-hub-border" />
-                      <button onClick={() => handleDeletePost(post.id)} disabled={deletingId === post.id} className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40">
-                        {deletingId === post.id ? "Deleting..." : "Delete post"}
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+                {menuOpenFor === post.id && (
+                  <div className="absolute right-0 top-12 z-20 w-56 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                    <button onClick={() => setInterest(post.id, "interested")} className="flex w-full items-start gap-3 px-3 py-2 text-left">
+                      <PlusCircleIcon />
+                      <span>
+                        <span className="block text-xs font-medium text-white">{interestState[post.id] === "interested" ? "Marked Interested" : "Interested"}</span>
+                        <span className="block text-[10px] text-hub-textDim">More posts like this</span>
+                      </span>
+                    </button>
+                    <button onClick={() => setInterest(post.id, "not_interested")} className="flex w-full items-start gap-3 px-3 py-2 text-left">
+                      <MinusCircleIcon />
+                      <span>
+                        <span className="block text-xs font-medium text-white">{interestState[post.id] === "not_interested" ? "Marked Not interested" : "Not interested"}</span>
+                        <span className="block text-[10px] text-hub-textDim">Fewer posts like this</span>
+                      </span>
+                    </button>
+                    <div className="my-1 border-t border-hub-border" />
+                    <button onClick={() => toggleBookmark(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <BookmarkIcon filled={!!bookmarked[post.id]} />{bookmarked[post.id] ? "Saved" : "Save post"}
+                    </button>
+                    <button onClick={() => sharePost(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <ShareIcon />Share
+                    </button>
+                    <button onClick={() => hidePost(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <EyeOffIcon />I don&apos;t want to see this
+                    </button>
+                    <button onClick={reportPost} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <FlagIcon />Report post
+                    </button>
+                    <button onClick={() => toggleNotify(post.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <BellSmallIcon />{notifyOn[post.id] ? "Turn off notifications" : "Turn on notifications"}
+                    </button>
+                    <button onClick={() => copyLink(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                      <LinkIcon />Copy link
+                    </button>
+                    {isMine && (
+                      <>
+                        <div className="my-1 border-t border-hub-border" />
+                        <button onClick={() => handleDeletePost(post.id)} disabled={deletingId === post.id} className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40">
+                          {deletingId === post.id ? "Deleting..." : "Delete post"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {post.content && (
                 <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(post.content)}</p>
@@ -647,13 +690,23 @@ export default function DiscoverPage() {
               )}
               {post.video_url && (
                 <div className="-mx-4 mt-3 overflow-hidden bg-black">
-                  <video src={post.video_url} controls preload="metadata" className="block w-full" style={{ borderRadius: 0 }} />
+                  <video
+                    ref={registerVideoRef}
+                    src={post.video_url}
+                    controls
+                    preload="metadata"
+                    className="block w-full"
+                    style={{ borderRadius: 0 }}
+                  />
                 </div>
               )}
 
               {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
-              <div className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
+              <div
+                ref={(el) => { reactionScopeRefs.current[post.id] = el; }}
+                className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3"
+              >
                 {reactionPickerFor === post.id && (
                   <div className="absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 rounded-2xl border border-hub-border bg-hub-card2 px-4 py-3 shadow-xl">
                     <div className="flex items-start gap-4">
