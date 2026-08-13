@@ -84,14 +84,14 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Greeting card */}
+      {/* Greeting card — solid navy on the left blending into the campus photo on the right */}
       <div
         className="relative mx-5 mt-5 overflow-hidden rounded-2xl p-5 bg-cover bg-center"
-        style={{ backgroundImage: `url(${CAMPUS_GATE_IMAGE_URL})` }}
+        style={{
+          backgroundImage: `linear-gradient(to right, #0A0F1E 35%, rgba(10,15,30,0.55) 65%, rgba(10,15,30,0.15) 100%), url(${CAMPUS_GATE_IMAGE_URL})`,
+        }}
       >
-        {/* Navy-tinted overlay for text readability, matching app accent */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0A0F1E]/90 via-[#0A0F1E]/70 to-[#0A0F1E]/30" />
-        <div className="relative">
+        <div className="relative max-w-[75%]">
           <p className="text-lg font-medium text-white">
             {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
           </p>
@@ -134,6 +134,48 @@ export default function HomePage() {
               {tag}
             </span>
           ))}
+        </div>
+      </div>
+
+      {/* Post composer — visual placeholder, wiring to Discover feed comes later */}
+      <div className="mx-5 mt-6">
+        <div className="rounded-xl border border-hub-border bg-hub-card p-3">
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 text-left"
+            onClick={() => router.push("/discover")}
+          >
+            <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+              {firstName ? firstName.charAt(0).toUpperCase() : "U"}
+            </div>
+            <span className="text-sm text-hub-textDim">What&apos;s happening on campus?</span>
+          </button>
+          <div className="mt-3 flex items-center gap-5 border-t border-hub-border pt-3">
+            <button
+              type="button"
+              onClick={() => router.push("/discover")}
+              className="flex items-center gap-1.5 text-xs text-hub-textDim"
+            >
+              <PhotoIcon />
+              Photo
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/discover")}
+              className="flex items-center gap-1.5 text-xs text-hub-textDim"
+            >
+              <VideoIcon />
+              Video
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/discover")}
+              className="flex items-center gap-1.5 text-xs text-hub-textDim"
+            >
+              <PollIcon />
+              Poll
+            </button>
+          </div>
         </div>
       </div>
 
@@ -214,6 +256,30 @@ function BellIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
       <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PhotoIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="10" r="1.8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3 16l5-5 4 4 3-3 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function VideoIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 10l5-3v10l-5-3" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function PollIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M5 20V10M12 20V4M19 20v-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
