@@ -642,21 +642,31 @@ export default function DiscoverPage() {
                 <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{post.content}</p>
               )}
 
-              {/* Media — full-bleed, no card-within-card frame */}
+              {/* Media — clipped wrapper forces true edge-to-edge, overrides any native rounding */}
               {post.image_url && (
-                <div className="-mx-4 mt-3">
-                  <img src={post.image_url} alt="Post image" loading="lazy" className="w-full object-cover" />
+                <div className="-mx-4 mt-3 overflow-hidden">
+                  <img
+                    src={post.image_url}
+                    alt="Post image"
+                    loading="lazy"
+                    className="block w-full object-cover"
+                    style={{ borderRadius: 0 }}
+                  />
                 </div>
               )}
               {post.video_url && (
-                <div className="-mx-4 mt-3">
-                  <video src={post.video_url} controls preload="metadata" className="w-full" />
+                <div className="-mx-4 mt-3 overflow-hidden bg-black">
+                  <video
+                    src={post.video_url}
+                    controls
+                    preload="metadata"
+                    className="block w-full"
+                    style={{ borderRadius: 0 }}
+                  />
                 </div>
               )}
 
-              {summaryText && (
-                <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>
-              )}
+              {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
               <div className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
                 {reactionPickerFor === post.id && (
@@ -681,10 +691,11 @@ export default function DiscoverPage() {
                   </div>
                 )}
 
-                <div className="flex items-center gap-5">
+                {/* Icon + count only — no word labels */}
+                <div className="flex items-center gap-6">
                   <button
                     onClick={() => toggleReactionButton(post.id)}
-                    className={`flex shrink-0 items-center gap-1.5 text-xs ${
+                    className={`flex items-center gap-1.5 text-xs ${
                       activeReactionInfo ? activeReactionInfo.color : "text-hub-textDim"
                     }`}
                   >
@@ -692,26 +703,25 @@ export default function DiscoverPage() {
                       activeReactionInfo.type === "like" ? (
                         <ThumbsUpIcon className="text-hub-accentLight" filled />
                       ) : (
-                        <span className="text-sm leading-none">{activeReactionInfo.emoji}</span>
+                        <span className="text-base leading-none">{activeReactionInfo.emoji}</span>
                       )
                     ) : (
-                      <HeartIcon filled={false} />
+                      <ThumbsUpIcon className="text-hub-textDim" />
                     )}
-                    <span>{activeReactionInfo ? activeReactionInfo.label : "Like"}</span>
+                    {postReactions.length > 0 && <span>{postReactions.length}</span>}
                   </button>
                   <button
                     onClick={() => setCommentOpenFor(commentOpenFor === post.id ? null : post.id)}
-                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
+                    className="flex items-center gap-1.5 text-xs text-hub-textDim"
                   >
                     <CommentIcon />
-                    <span>Comment{postComments.length > 0 ? ` (${postComments.length})` : ""}</span>
+                    {postComments.length > 0 && <span>{postComments.length}</span>}
                   </button>
                   <button
                     onClick={() => sharePost(post)}
-                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
+                    className="flex items-center gap-1.5 text-xs text-hub-textDim"
                   >
                     <ShareIcon />
-                    <span>Share</span>
                   </button>
                 </div>
                 <button
@@ -795,18 +805,6 @@ function MoreIcon() {
       <circle cx="5" cy="12" r="1.6" fill="currentColor" />
       <circle cx="12" cy="12" r="1.6" fill="currentColor" />
       <circle cx="19" cy="12" r="1.6" fill="currentColor" />
-    </svg>
-  );
-}
-function HeartIcon({ filled }: { filled: boolean }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
-      <path
-        d="M12 20s-7-4.35-9.5-8.5C.7 8 2.5 4.5 6 4.5c2 0 3.5 1.2 6 3.5 2.5-2.3 4-3.5 6-3.5 3.5 0 5.3 3.5 3.5 7C19 15.65 12 20 12 20z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
     </svg>
   );
 }
