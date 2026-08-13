@@ -19,8 +19,8 @@ type Post = {
 
 type ReactionType = "like" | "love" | "care" | "haha" | "wow" | "sad" | "angry";
 
-const REACTIONS: { type: ReactionType; emoji: string; label: string; color: string }[] = [
-  { type: "like", emoji: "👍", label: "Like", color: "text-hub-accentLight" },
+const REACTIONS: { type: ReactionType; emoji: string | null; label: string; color: string }[] = [
+  { type: "like", emoji: null, label: "Like", color: "text-hub-accentLight" },
   { type: "love", emoji: "❤️", label: "Love", color: "text-red-400" },
   { type: "care", emoji: "🥰", label: "Care", color: "text-yellow-400" },
   { type: "haha", emoji: "😆", label: "Haha", color: "text-yellow-400" },
@@ -66,6 +66,7 @@ export default function DiscoverPage() {
   const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({});
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -170,6 +171,29 @@ export default function DiscoverPage() {
     setVideoFile(null);
     await loadPosts();
     setPosting(false);
+  }
+
+  async function handleDeletePost(postId: string) {
+    if (!userId) return;
+    const confirmed = window.confirm("Delete this post? This can't be undone.");
+    if (!confirmed) return;
+
+    setDeletingId(postId);
+    const { error } = await supabase
+      .from("discover_posts")
+      .delete()
+      .eq("id", postId)
+      .eq("user_id", userId);
+
+    setDeletingId(null);
+    setMenuOpenFor(null);
+
+    if (error) {
+      alert("Delete failed: " + error.message);
+      return;
+    }
+
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
   }
 
   function pickReaction(postId: string, type: ReactionType) {
@@ -372,6 +396,7 @@ export default function DiscoverPage() {
         {visiblePosts.map((post) => {
           const activeReaction = reactions[post.id];
           const activeReactionInfo = REACTIONS.find((r) => r.type === activeReaction);
+          const isMine = post.user_id === userId;
 
           return (
             <div
@@ -470,11 +495,15 @@ export default function DiscoverPage() {
                     <LinkIcon />
                     Copy link
                   </button>
-                  {post.user_id === userId && (
+                  {isMine && (
                     <>
                       <div className="my-1 border-t border-hub-border" />
-                      <button className="block w-full px-3 py-2 text-left text-xs text-red-400">
-                        Delete post
+                      <button
+                        onClick={() => handleDeletePost(post.id)}
+                        disabled={deletingId === post.id}
+                        className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40"
+                      >
+                        {deletingId === post.id ? "Deleting..." : "Delete post"}
                       </button>
                     </>
                   )}
@@ -491,6 +520,7 @@ export default function DiscoverPage() {
                 <img
                   src={post.image_url}
                   alt="Post image"
+                  loading="lazy"
                   className="mt-3 w-full rounded-lg object-cover"
                 />
               )}
@@ -499,6 +529,7 @@ export default function DiscoverPage() {
                 <video
                   src={post.video_url}
                   controls
+                  preload="metadata"
                   className="mt-3 w-full rounded-lg"
                 />
               )}
@@ -510,12 +541,16 @@ export default function DiscoverPage() {
                       <button
                         key={r.type}
                         onClick={() => pickReaction(post.id, r.type)}
-                        className={`text-lg leading-none transition-transform active:scale-125 ${
+                        className={`flex items-center justify-center leading-none transition-transform active:scale-125 ${
                           activeReaction === r.type ? "scale-110" : ""
                         }`}
                         aria-label={r.label}
                       >
-                        {r.emoji}
+                        {r.type === "like" ? (
+                          <ThumbsUpIcon className="text-hub-accentLight" />
+                        ) : (
+                          <span className="text-lg">{r.emoji}</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -529,7 +564,11 @@ export default function DiscoverPage() {
                     }`}
                   >
                     {activeReactionInfo ? (
-                      <span className="text-sm leading-none">{activeReactionInfo.emoji}</span>
+                      activeReactionInfo.type === "like" ? (
+                        <ThumbsUpIcon className="text-hub-accentLight" filled />
+                      ) : (
+                        <span className="text-sm leading-none">{activeReactionInfo.emoji}</span>
+                      )
                     ) : (
                       <HeartIcon filled={false} />
                     )}
@@ -599,6 +638,24 @@ function HeartIcon({ filled }: { filled: boolean }) {
         d="M12 20s-7-4.35-9.5-8.5C.7 8 2.5 4.5 6 4.5c2 0 3.5 1.2 6 3.5 2.5-2.3 4-3.5 6-3.5 3.5 0 5.3 3.5 3.5 7C19 15.65 12 20 12 20z"
         stroke="currentColor"
         strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function ThumbsUpIcon({ className, filled }: { className?: string; filled?: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      className={className}
+    >
+      <path
+        d="M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zm0 0l4.5-8a2 2 0 013.7 1.6L14 9h5a2 2 0 012 2.2l-1.3 7A2 2 0 0117.7 20H10a3 3 0 01-3-3v-6z"
+        stroke="currentColor"
+        strokeWidth="1.6"
         strokeLinejoin="round"
       />
     </svg>
