@@ -89,8 +89,8 @@ export default function HomePage() {
         className="relative mx-5 mt-5 overflow-hidden rounded-2xl p-5 bg-cover bg-center"
         style={{ backgroundImage: `url(${CAMPUS_GATE_IMAGE_URL})` }}
       >
-        {/* Dark overlay for text readability */}
-        <div className="absolute inset-0 bg-gradient-to-br from-black/70 via-black/50 to-black/30" />
+        {/* Navy-tinted overlay for text readability, matching app accent */}
+        <div className="absolute inset-0 bg-gradient-to-br from-[#0A0F1E]/90 via-[#0A0F1E]/70 to-[#0A0F1E]/30" />
         <div className="relative">
           <p className="text-lg font-medium text-white">
             {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
@@ -98,6 +98,7 @@ export default function HomePage() {
           <p className="mt-1 text-sm text-white/80">
             Here&apos;s what&apos;s happening around your campus.
           </p>
+          <div className="mt-2 h-0.5 w-10 rounded-full bg-hub-accentLight" />
         </div>
       </div>
 
