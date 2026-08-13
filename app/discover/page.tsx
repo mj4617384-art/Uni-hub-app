@@ -30,6 +30,17 @@ type Comment = {
   first_name?: string;
 };
 
+type SportsUpdate = {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  image_url: string | null;
+  category: string;
+  created_at: string;
+  first_name?: string;
+};
+
 const REACTIONS: { type: ReactionType; emoji: string | null; label: string; bg: string }[] = [
   { type: "like", emoji: null, label: "Like", bg: "bg-hub-accentLight" },
   { type: "love", emoji: "❤️", label: "Love", bg: "bg-red-500" },
@@ -44,6 +55,19 @@ const REACTION_BOTTOM = REACTIONS.slice(3);
 
 const tabs = ["For You", "Following", "Sports", "News", "Clubs"];
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+const SPORTS_CATEGORY_OPTIONS = [
+  "Football",
+  "Basketball",
+  "Athletics",
+  "Volleyball",
+  "Table Tennis",
+  "Handball",
+  "Badminton",
+  "Chess",
+  "Swimming",
+  "Rugby",
+];
 
 function linkifyContent(text: string) {
   const parts = text.split(URL_REGEX);
@@ -126,6 +150,20 @@ export default function DiscoverPage() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
+  // ---- Sports tab state ----
+  const [sportsUpdates, setSportsUpdates] = useState<SportsUpdate[]>([]);
+  const [sportsLoaded, setSportsLoaded] = useState(false);
+  const [sportsLoading, setSportsLoading] = useState(false);
+  const [sportsTitle, setSportsTitle] = useState("");
+  const [sportsDescription, setSportsDescription] = useState("");
+  const [sportsCategory, setSportsCategory] = useState("");
+  const [sportsCategoryFocused, setSportsCategoryFocused] = useState(false);
+  const [sportsImageFile, setSportsImageFile] = useState<File | null>(null);
+  const [sportsPosting, setSportsPosting] = useState(false);
+  const [sportsUploadError, setSportsUploadError] = useState<string | null>(null);
+  const sportsImageInputRef = useRef<HTMLInputElement>(null);
+  const sportsCategoryScopeRef = useRef<HTMLDivElement | null>(null);
+
   // Click-outside scopes for reaction popup + post menu
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -152,7 +190,7 @@ export default function DiscoverPage() {
     if (el) videoObserverRef.current?.observe(el);
   }
 
-  // Close reaction popup / post menu when tapping anywhere outside them
+  // Close reaction popup / post menu / sports category suggestions when tapping outside them
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
       if (reactionPickerFor) {
@@ -163,10 +201,14 @@ export default function DiscoverPage() {
         const scope = menuScopeRefs.current[menuOpenFor];
         if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
       }
+      if (sportsCategoryFocused) {
+        const scope = sportsCategoryScopeRef.current;
+        if (scope && !scope.contains(e.target as Node)) setSportsCategoryFocused(false);
+      }
     }
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
-  }, [reactionPickerFor, menuOpenFor]);
+  }, [reactionPickerFor, menuOpenFor, sportsCategoryFocused]);
 
   useEffect(() => {
     async function init() {
@@ -187,6 +229,13 @@ export default function DiscoverPage() {
     }
     init();
   }, [router]);
+
+  // Lazy-load Sports updates the first time the Sports tab is opened
+  useEffect(() => {
+    if (activeTab === "Sports" && !sportsLoaded) {
+      loadSportsUpdates();
+    }
+  }, [activeTab, sportsLoaded]);
 
   async function loadPosts() {
     const { data, error } = await supabase
@@ -509,6 +558,78 @@ export default function DiscoverPage() {
     setMenuOpenFor(null);
   }
 
+  // ---- Sports tab logic ----
+
+  async function loadSportsUpdates() {
+    setSportsLoading(true);
+    const { data, error } = await supabase
+      .from("sports_updates")
+      .select("*, profiles(first_name)")
+      .order("created_at", { ascending: false });
+
+    setSportsLoading(false);
+    setSportsLoaded(true);
+
+    if (error) {
+      console.error(error);
+      alert("Load sports updates failed: " + error.message);
+      return;
+    }
+
+    const mapped = (data ?? []).map((s: any) => ({
+      ...s,
+      first_name: s.profiles?.first_name ?? "Student",
+    }));
+    setSportsUpdates(mapped);
+  }
+
+  function filteredCategorySuggestions() {
+    const q = sportsCategory.trim().toLowerCase();
+    if (!q) return SPORTS_CATEGORY_OPTIONS;
+    return SPORTS_CATEGORY_OPTIONS.filter((c) => c.toLowerCase().includes(q));
+  }
+
+  async function handleSportsPost() {
+    if (!userId || !sportsTitle.trim() || !sportsCategory.trim()) return;
+    setSportsPosting(true);
+    setSportsUploadError(null);
+
+    let image_url: string | null = null;
+
+    if (sportsImageFile) {
+      const path = `${userId}/${Date.now()}-${sportsImageFile.name}`;
+      const { error: upErr } = await supabase.storage.from("sports-images").upload(path, sportsImageFile);
+      if (upErr) {
+        setSportsUploadError("Image upload failed: " + upErr.message);
+        setSportsPosting(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from("sports-images").getPublicUrl(path);
+      image_url = urlData.publicUrl;
+    }
+
+    const { error } = await supabase.from("sports_updates").insert({
+      user_id: userId,
+      title: sportsTitle.trim(),
+      description: sportsDescription.trim() || null,
+      image_url,
+      category: sportsCategory.trim(),
+    });
+
+    if (error) {
+      setSportsUploadError("Post failed: " + error.message);
+      setSportsPosting(false);
+      return;
+    }
+
+    setSportsTitle("");
+    setSportsDescription("");
+    setSportsCategory("");
+    setSportsImageFile(null);
+    await loadSportsUpdates();
+    setSportsPosting(false);
+  }
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-hub-bg">
@@ -518,6 +639,7 @@ export default function DiscoverPage() {
   }
 
   const visiblePosts = activeTab === "For You" ? posts : [];
+  const trendingSportsUpdate = sportsUpdates.find((s) => s.image_url) ?? sportsUpdates[0] ?? null;
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -593,8 +715,131 @@ export default function DiscoverPage() {
         </div>
       )}
 
+      {activeTab === "Sports" && (
+        <div className="px-5">
+          {/* Composer */}
+          <div className="mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
+            <input
+              value={sportsTitle}
+              onChange={(e) => setSportsTitle(e.target.value)}
+              placeholder="Update title (e.g. UniLafia FC wins inter-faculty match)"
+              className="w-full bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
+            />
+            <textarea
+              value={sportsDescription}
+              onChange={(e) => setSportsDescription(e.target.value)}
+              placeholder="Add more details (optional)"
+              rows={2}
+              className="mt-2 w-full resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
+            />
+
+            <div ref={sportsCategoryScopeRef} className="relative mt-2">
+              <input
+                value={sportsCategory}
+                onChange={(e) => setSportsCategory(e.target.value)}
+                onFocus={() => setSportsCategoryFocused(true)}
+                placeholder="Category (e.g. Football, Basketball...)"
+                className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-2 text-xs text-white placeholder:text-hub-textDim outline-none"
+              />
+              {sportsCategoryFocused && filteredCategorySuggestions().length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                  {filteredCategorySuggestions().map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => {
+                        setSportsCategory(c);
+                        setSportsCategoryFocused(false);
+                      }}
+                      className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {sportsImageFile && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
+                <PhotoIcon />
+                <span>{sportsImageFile.name}</span>
+                <button onClick={() => setSportsImageFile(null)} className="text-red-400 shrink-0">Remove</button>
+              </div>
+            )}
+            {sportsUploadError && <p className="mt-2 text-xs text-red-400">{sportsUploadError}</p>}
+
+            <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+              <button type="button" onClick={() => sportsImageInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
+                <PhotoIcon /><span>Photo</span>
+              </button>
+              <input ref={sportsImageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setSportsImageFile(e.target.files[0]); }} />
+              <button
+                onClick={handleSportsPost}
+                disabled={sportsPosting || !sportsTitle.trim() || !sportsCategory.trim()}
+                className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+              >
+                {sportsPosting ? "Posting..." : "Post"}
+              </button>
+            </div>
+          </div>
+
+          {/* Trending Sports */}
+          {trendingSportsUpdate && (
+            <div className="mt-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-medium text-white">Trending Sports</h2>
+              </div>
+              <div className="relative mt-2 -mx-5 overflow-hidden">
+                {trendingSportsUpdate.image_url ? (
+                  <img src={trendingSportsUpdate.image_url} alt={trendingSportsUpdate.title} className="block h-48 w-full object-cover" />
+                ) : (
+                  <div className="h-48 w-full bg-hub-card2" />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                <div className="absolute bottom-0 left-0 right-0 p-4">
+                  <span className="inline-block rounded-md bg-hub-accentLight px-2 py-0.5 text-[10px] font-medium text-white">
+                    {trendingSportsUpdate.category}
+                  </span>
+                  <p className="mt-1.5 text-base font-semibold text-white">{trendingSportsUpdate.title}</p>
+                  {trendingSportsUpdate.description && (
+                    <p className="mt-0.5 text-xs text-white/80 line-clamp-2">{trendingSportsUpdate.description}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Updates */}
+          <div className="mt-5">
+            <h2 className="text-sm font-medium text-white">Recent Updates</h2>
+            {sportsLoading && <p className="mt-2 text-xs text-hub-textDim">Loading...</p>}
+            {!sportsLoading && sportsUpdates.length === 0 && (
+              <p className="mt-2 text-xs text-hub-textDim">No sports updates yet — be the first to share one!</p>
+            )}
+            <div className="mt-2 flex flex-col gap-3">
+              {sportsUpdates.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-2.5">
+                  {s.image_url ? (
+                    <img src={s.image_url} alt={s.title} className="h-14 w-14 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <div className="h-14 w-14 shrink-0 rounded-lg bg-hub-card2" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-white">{s.title}</p>
+                    <p className="text-xs text-hub-textDim">{timeAgo(s.created_at)} · {s.first_name}</p>
+                  </div>
+                  <span className="shrink-0 rounded-md bg-hub-card2 px-2 py-0.5 text-[10px] text-hub-accentLight">
+                    {s.category}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4">
-        {activeTab !== "For You" && (
+        {activeTab !== "For You" && activeTab !== "Sports" && (
           <p className="px-5 text-center text-sm text-hub-textDim">{activeTab} isn&apos;t live yet — check back soon.</p>
         )}
         {activeTab === "For You" && visiblePosts.length === 0 && (
