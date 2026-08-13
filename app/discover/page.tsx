@@ -19,6 +19,17 @@ type Post = {
 
 type ReactionType = "like" | "love" | "care" | "haha" | "wow" | "sad" | "angry";
 
+type ReactionRecord = { type: ReactionType; user_id: string; first_name: string };
+
+type Comment = {
+  id: string;
+  post_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+  first_name?: string;
+};
+
 const REACTIONS: { type: ReactionType; emoji: string | null; label: string; color: string }[] = [
   { type: "like", emoji: null, label: "Like", color: "text-hub-accentLight" },
   { type: "love", emoji: "❤️", label: "Love", color: "text-red-400" },
@@ -48,6 +59,17 @@ function timeAgo(dateStr: string) {
   return `${days}d ago`;
 }
 
+function reactionSummaryText(records: ReactionRecord[], userId: string | null) {
+  if (records.length === 0) return null;
+  const mine = records.find((r) => r.user_id === userId);
+  const others = records.filter((r) => r.user_id !== userId);
+  if (mine && others.length === 0) return "You reacted";
+  if (mine) return `You and ${others.length} other${others.length > 1 ? "s" : ""} reacted`;
+  const first = records[0];
+  const rest = records.length - 1;
+  return rest > 0 ? `${first.first_name} and ${rest} other${rest > 1 ? "s" : ""} reacted` : `${first.first_name} reacted`;
+}
+
 export default function DiscoverPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -59,8 +81,16 @@ export default function DiscoverPage() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [posting, setPosting] = useState(false);
   const [activeTab, setActiveTab] = useState("For You");
-  const [reactions, setReactions] = useState<Record<string, ReactionType | null>>({});
+
+  const [reactionsByPost, setReactionsByPost] = useState<Record<string, ReactionRecord[]>>({});
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const [reactingId, setReactingId] = useState<string | null>(null);
+
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
+  const [commentOpenFor, setCommentOpenFor] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
+  const [commentPosting, setCommentPosting] = useState<string | null>(null);
+
   const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({});
   const [interestState, setInterestState] = useState<Record<string, "interested" | "not_interested" | null>>({});
   const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({});
@@ -108,6 +138,85 @@ export default function DiscoverPage() {
       department: p.profiles?.department ?? null,
     }));
     setPosts(mapped);
+
+    const ids = mapped.map((p) => p.id);
+    if (ids.length > 0) {
+      await Promise.all([loadReactions(ids), loadComments(ids)]);
+    }
+  }
+
+  async function loadReactions(postIds: string[]) {
+    const { data, error } = await supabase
+      .from("discover_reactions")
+      .select("post_id, user_id, type, profiles(first_name)")
+      .in("post_id", postIds);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const grouped: Record<string, ReactionRecord[]> = {};
+    (data ?? []).forEach((r: any) => {
+      if (!grouped[r.post_id]) grouped[r.post_id] = [];
+      grouped[r.post_id].push({
+        type: r.type,
+        user_id: r.user_id,
+        first_name: r.profiles?.first_name ?? "Student",
+      });
+    });
+    setReactionsByPost(grouped);
+  }
+
+  async function refreshReactionsForPost(postId: string) {
+    const { data, error } = await supabase
+      .from("discover_reactions")
+      .select("post_id, user_id, type, profiles(first_name)")
+      .eq("post_id", postId);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setReactionsByPost((prev) => ({
+      ...prev,
+      [postId]: (data ?? []).map((r: any) => ({
+        type: r.type,
+        user_id: r.user_id,
+        first_name: r.profiles?.first_name ?? "Student",
+      })),
+    }));
+  }
+
+  async function loadComments(postIds: string[]) {
+    const { data, error } = await supabase
+      .from("discover_comments")
+      .select("*, profiles(first_name)")
+      .in("post_id", postIds)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const grouped: Record<string, Comment[]> = {};
+    (data ?? []).forEach((c: any) => {
+      if (!grouped[c.post_id]) grouped[c.post_id] = [];
+      grouped[c.post_id].push({ ...c, first_name: c.profiles?.first_name ?? "Student" });
+    });
+    setCommentsByPost(grouped);
+  }
+
+  async function refreshCommentsForPost(postId: string) {
+    const { data, error } = await supabase
+      .from("discover_comments")
+      .select("*, profiles(first_name)")
+      .eq("post_id", postId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setCommentsByPost((prev) => ({
+      ...prev,
+      [postId]: (data ?? []).map((c: any) => ({ ...c, first_name: c.profiles?.first_name ?? "Student" })),
+    }));
   }
 
   async function handlePost() {
@@ -120,33 +229,25 @@ export default function DiscoverPage() {
 
     if (imageFile) {
       const path = `${userId}/${Date.now()}-${imageFile.name}`;
-      const { error: upErr } = await supabase.storage
-        .from("discover-images")
-        .upload(path, imageFile);
+      const { error: upErr } = await supabase.storage.from("discover-images").upload(path, imageFile);
       if (upErr) {
         setUploadError("Image upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
-      const { data: urlData } = supabase.storage
-        .from("discover-images")
-        .getPublicUrl(path);
+      const { data: urlData } = supabase.storage.from("discover-images").getPublicUrl(path);
       image_url = urlData.publicUrl;
     }
 
     if (videoFile) {
       const path = `${userId}/${Date.now()}-${videoFile.name}`;
-      const { error: upErr } = await supabase.storage
-        .from("discover-videos")
-        .upload(path, videoFile);
+      const { error: upErr } = await supabase.storage.from("discover-videos").upload(path, videoFile);
       if (upErr) {
         setUploadError("Video upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
-      const { data: urlData } = supabase.storage
-        .from("discover-videos")
-        .getPublicUrl(path);
+      const { data: urlData } = supabase.storage.from("discover-videos").getPublicUrl(path);
       video_url = urlData.publicUrl;
     }
 
@@ -196,20 +297,54 @@ export default function DiscoverPage() {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }
 
-  function pickReaction(postId: string, type: ReactionType) {
-    setReactions((prev) => ({
-      ...prev,
-      [postId]: prev[postId] === type ? null : type,
-    }));
+  async function pickReaction(postId: string, type: ReactionType) {
+    if (!userId) return;
+    setReactingId(postId);
+    const existing = (reactionsByPost[postId] || []).find((r) => r.user_id === userId);
+
+    if (existing && existing.type === type) {
+      const { error } = await supabase
+        .from("discover_reactions")
+        .delete()
+        .eq("post_id", postId)
+        .eq("user_id", userId);
+      if (error) alert("Reaction failed: " + error.message);
+    } else {
+      const { error } = await supabase
+        .from("discover_reactions")
+        .upsert({ post_id: postId, user_id: userId, type }, { onConflict: "post_id,user_id" });
+      if (error) alert("Reaction failed: " + error.message);
+    }
+
+    await refreshReactionsForPost(postId);
+    setReactingId(null);
     setReactionPickerFor(null);
   }
 
   function toggleReactionButton(postId: string) {
-    if (reactionPickerFor === postId) {
-      setReactionPickerFor(null);
+    setReactionPickerFor((prev) => (prev === postId ? null : postId));
+  }
+
+  async function submitComment(postId: string) {
+    if (!userId) return;
+    const text = (commentDraft[postId] || "").trim();
+    if (!text) return;
+
+    setCommentPosting(postId);
+    const { error } = await supabase.from("discover_comments").insert({
+      post_id: postId,
+      user_id: userId,
+      content: text,
+    });
+    setCommentPosting(null);
+
+    if (error) {
+      alert("Comment failed: " + error.message);
       return;
     }
-    setReactionPickerFor(postId);
+
+    setCommentDraft((prev) => ({ ...prev, [postId]: "" }));
+    await refreshCommentsForPost(postId);
   }
 
   function toggleBookmark(id: string) {
@@ -240,10 +375,7 @@ export default function DiscoverPage() {
   }
 
   function setInterest(postId: string, val: "interested" | "not_interested") {
-    setInterestState((prev) => ({
-      ...prev,
-      [postId]: prev[postId] === val ? null : val,
-    }));
+    setInterestState((prev) => ({ ...prev, [postId]: prev[postId] === val ? null : val }));
     setMenuOpenFor(null);
   }
 
@@ -328,9 +460,7 @@ export default function DiscoverPage() {
             </div>
           )}
 
-          {uploadError && (
-            <p className="mt-2 text-xs text-red-400">{uploadError}</p>
-          )}
+          {uploadError && <p className="mt-2 text-xs text-red-400">{uploadError}</p>}
 
           <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
             <div className="flex items-center gap-5">
@@ -394,15 +524,15 @@ export default function DiscoverPage() {
         )}
 
         {visiblePosts.map((post) => {
-          const activeReaction = reactions[post.id];
-          const activeReactionInfo = REACTIONS.find((r) => r.type === activeReaction);
+          const postReactions = reactionsByPost[post.id] || [];
+          const myReaction = postReactions.find((r) => r.user_id === userId)?.type ?? null;
+          const activeReactionInfo = REACTIONS.find((r) => r.type === myReaction);
+          const summaryText = reactionSummaryText(postReactions, userId);
+          const postComments = commentsByPost[post.id] || [];
           const isMine = post.user_id === userId;
 
           return (
-            <div
-              key={post.id}
-              className="relative rounded-xl border border-hub-border bg-hub-card p-4"
-            >
+            <div key={post.id} className="relative rounded-xl border border-hub-border bg-hub-card p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
@@ -417,9 +547,7 @@ export default function DiscoverPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() =>
-                    setMenuOpenFor(menuOpenFor === post.id ? null : post.id)
-                  }
+                  onClick={() => setMenuOpenFor(menuOpenFor === post.id ? null : post.id)}
                   className="shrink-0 text-hub-textDim px-1"
                 >
                   <MoreIcon />
@@ -511,38 +639,35 @@ export default function DiscoverPage() {
               )}
 
               {post.content && (
-                <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">
-                  {post.content}
-                </p>
+                <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{post.content}</p>
               )}
 
+              {/* Media — full-bleed, no card-within-card frame */}
               {post.image_url && (
-                <img
-                  src={post.image_url}
-                  alt="Post image"
-                  loading="lazy"
-                  className="mt-3 w-full rounded-lg object-cover"
-                />
+                <div className="-mx-4 mt-3">
+                  <img src={post.image_url} alt="Post image" loading="lazy" className="w-full object-cover" />
+                </div>
               )}
-
               {post.video_url && (
-                <video
-                  src={post.video_url}
-                  controls
-                  preload="metadata"
-                  className="mt-3 w-full rounded-lg"
-                />
+                <div className="-mx-4 mt-3">
+                  <video src={post.video_url} controls preload="metadata" className="w-full" />
+                </div>
               )}
 
-              <div className="relative mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+              {summaryText && (
+                <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>
+              )}
+
+              <div className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
                 {reactionPickerFor === post.id && (
                   <div className="absolute bottom-full left-0 z-20 mb-2 flex items-center gap-1 rounded-full border border-hub-border bg-hub-card2 px-2 py-1.5 shadow-lg">
                     {REACTIONS.map((r) => (
                       <button
                         key={r.type}
                         onClick={() => pickReaction(post.id, r.type)}
+                        disabled={reactingId === post.id}
                         className={`flex items-center justify-center leading-none transition-transform active:scale-125 ${
-                          activeReaction === r.type ? "scale-110" : ""
+                          myReaction === r.type ? "scale-110" : ""
                         }`}
                         aria-label={r.label}
                       >
@@ -574,9 +699,12 @@ export default function DiscoverPage() {
                     )}
                     <span>{activeReactionInfo ? activeReactionInfo.label : "Like"}</span>
                   </button>
-                  <button className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
+                  <button
+                    onClick={() => setCommentOpenFor(commentOpenFor === post.id ? null : post.id)}
+                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
+                  >
                     <CommentIcon />
-                    <span>Comment</span>
+                    <span>Comment{postComments.length > 0 ? ` (${postComments.length})` : ""}</span>
                   </button>
                   <button
                     onClick={() => sharePost(post)}
@@ -588,13 +716,52 @@ export default function DiscoverPage() {
                 </div>
                 <button
                   onClick={() => toggleBookmark(post.id)}
-                  className={`shrink-0 ${
-                    bookmarked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
-                  }`}
+                  className={`shrink-0 ${bookmarked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"}`}
                 >
                   <BookmarkIcon filled={!!bookmarked[post.id]} />
                 </button>
               </div>
+
+              {commentOpenFor === post.id && (
+                <div className="mt-3 border-t border-hub-border pt-3">
+                  <div className="flex flex-col gap-2 max-h-56 overflow-y-auto">
+                    {postComments.length === 0 && (
+                      <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>
+                    )}
+                    {postComments.map((c) => (
+                      <div key={c.id} className="flex items-start gap-2">
+                        <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
+                          {c.first_name?.charAt(0).toUpperCase() ?? "U"}
+                        </div>
+                        <div className="flex-1 rounded-lg bg-hub-card2 px-2.5 py-1.5">
+                          <p className="text-[11px] font-medium text-white">{c.first_name}</p>
+                          <p className="text-xs text-white/90 whitespace-pre-wrap">{c.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      value={commentDraft[post.id] || ""}
+                      onChange={(e) =>
+                        setCommentDraft((prev) => ({ ...prev, [post.id]: e.target.value }))
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") submitComment(post.id);
+                      }}
+                      placeholder="Write a comment..."
+                      className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+                    />
+                    <button
+                      onClick={() => submitComment(post.id)}
+                      disabled={commentPosting === post.id || !(commentDraft[post.id] || "").trim()}
+                      className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40"
+                    >
+                      {commentPosting === post.id ? "..." : "Send"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -645,13 +812,7 @@ function HeartIcon({ filled }: { filled: boolean }) {
 }
 function ThumbsUpIcon({ className, filled }: { className?: string; filled?: boolean }) {
   return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill={filled ? "currentColor" : "none"}
-      className={className}
-    >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} className={className}>
       <path
         d="M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zm0 0l4.5-8a2 2 0 013.7 1.6L14 9h5a2 2 0 012 2.2l-1.3 7A2 2 0 0117.7 20H10a3 3 0 01-3-3v-6z"
         stroke="currentColor"
@@ -664,12 +825,7 @@ function ThumbsUpIcon({ className, filled }: { className?: string; filled?: bool
 function CommentIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M4 4h16v12H8l-4 4V4z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+      <path d="M4 4h16v12H8l-4 4V4z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
     </svg>
   );
 }
