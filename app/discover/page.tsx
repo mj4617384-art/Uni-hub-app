@@ -17,6 +17,18 @@ type Post = {
   department?: string | null;
 };
 
+type ReactionType = "like" | "love" | "care" | "haha" | "wow" | "sad" | "angry";
+
+const REACTIONS: { type: ReactionType; emoji: string; label: string; color: string }[] = [
+  { type: "like", emoji: "👍", label: "Like", color: "text-hub-accentLight" },
+  { type: "love", emoji: "❤️", label: "Love", color: "text-red-400" },
+  { type: "care", emoji: "🥰", label: "Care", color: "text-yellow-400" },
+  { type: "haha", emoji: "😆", label: "Haha", color: "text-yellow-400" },
+  { type: "wow", emoji: "😮", label: "Wow", color: "text-yellow-400" },
+  { type: "sad", emoji: "😢", label: "Sad", color: "text-yellow-400" },
+  { type: "angry", emoji: "😠", label: "Angry", color: "text-orange-500" },
+];
+
 const tabs = ["For You", "Following", "Sports", "News", "Clubs"];
 
 function extractHashtags(text: string): string[] {
@@ -47,8 +59,11 @@ export default function DiscoverPage() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [posting, setPosting] = useState(false);
   const [activeTab, setActiveTab] = useState("For You");
-  const [liked, setLiked] = useState<Record<string, boolean>>({});
+  const [reactions, setReactions] = useState<Record<string, ReactionType | null>>({});
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({});
+  const [interestState, setInterestState] = useState<Record<string, "interested" | "not_interested" | null>>({});
+  const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({});
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -157,12 +172,70 @@ export default function DiscoverPage() {
     setPosting(false);
   }
 
-  function toggleLike(id: string) {
-    setLiked((prev) => ({ ...prev, [id]: !prev[id] }));
+  function pickReaction(postId: string, type: ReactionType) {
+    setReactions((prev) => ({
+      ...prev,
+      [postId]: prev[postId] === type ? null : type,
+    }));
+    setReactionPickerFor(null);
+  }
+
+  function toggleReactionButton(postId: string) {
+    if (reactionPickerFor === postId) {
+      setReactionPickerFor(null);
+      return;
+    }
+    setReactionPickerFor(postId);
   }
 
   function toggleBookmark(id: string) {
     setBookmarked((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  async function sharePost(post: Post) {
+    const url = `${window.location.origin}/discover?post=${post.id}`;
+    const text = post.content?.slice(0, 100) || "Check out this post on Uni.hub";
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Uni.hub", text, url });
+      } catch {
+        // user cancelled share sheet, no-op
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard");
+    }
+    setMenuOpenFor(null);
+  }
+
+  async function copyLink(post: Post) {
+    const url = `${window.location.origin}/discover?post=${post.id}`;
+    await navigator.clipboard.writeText(url);
+    alert("Link copied to clipboard");
+    setMenuOpenFor(null);
+  }
+
+  function setInterest(postId: string, val: "interested" | "not_interested") {
+    setInterestState((prev) => ({
+      ...prev,
+      [postId]: prev[postId] === val ? null : val,
+    }));
+    setMenuOpenFor(null);
+  }
+
+  function toggleNotify(postId: string) {
+    setNotifyOn((prev) => ({ ...prev, [postId]: !prev[postId] }));
+    setMenuOpenFor(null);
+  }
+
+  function hidePost(postId: string) {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setMenuOpenFor(null);
+  }
+
+  function reportPost() {
+    alert("Post reported. Our team will review it.");
+    setMenuOpenFor(null);
   }
 
   if (loading) {
@@ -296,96 +369,196 @@ export default function DiscoverPage() {
           </p>
         )}
 
-        {visiblePosts.map((post) => (
-          <div
-            key={post.id}
-            className="relative rounded-xl border border-hub-border bg-hub-card p-4"
-          >
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-                  {post.first_name?.charAt(0).toUpperCase() ?? "U"}
+        {visiblePosts.map((post) => {
+          const activeReaction = reactions[post.id];
+          const activeReactionInfo = REACTIONS.find((r) => r.type === activeReaction);
+
+          return (
+            <div
+              key={post.id}
+              className="relative rounded-xl border border-hub-border bg-hub-card p-4"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+                    {post.first_name?.charAt(0).toUpperCase() ?? "U"}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white">{post.first_name}</p>
+                    <p className="text-xs text-hub-textDim">
+                      {timeAgo(post.created_at)}
+                      {post.department ? ` · ${post.department}` : ""}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-white">{post.first_name}</p>
-                  <p className="text-xs text-hub-textDim">
-                    {timeAgo(post.created_at)}
-                    {post.department ? ` · ${post.department}` : ""}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() =>
-                  setMenuOpenFor(menuOpenFor === post.id ? null : post.id)
-                }
-                className="shrink-0 text-hub-textDim px-1"
-              >
-                <MoreIcon />
-              </button>
-            </div>
-
-            {menuOpenFor === post.id && (
-              <div className="absolute right-4 top-12 z-10 w-32 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-                <button className="block w-full px-3 py-2 text-left text-xs text-white/80">
-                  Report
-                </button>
-                {post.user_id === userId && (
-                  <button className="block w-full px-3 py-2 text-left text-xs text-red-400">
-                    Delete
-                  </button>
-                )}
-              </div>
-            )}
-
-            {post.content && (
-              <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">
-                {post.content}
-              </p>
-            )}
-
-            {post.image_url && (
-              <img
-                src={post.image_url}
-                alt="Post image"
-                className="mt-3 w-full rounded-lg object-cover"
-              />
-            )}
-
-            {post.video_url && (
-              <video
-                src={post.video_url}
-                controls
-                className="mt-3 w-full rounded-lg"
-              />
-            )}
-
-            <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-              <div className="flex items-center gap-5">
                 <button
-                  onClick={() => toggleLike(post.id)}
-                  className={`flex shrink-0 items-center gap-1.5 text-xs ${
-                    liked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
+                  onClick={() =>
+                    setMenuOpenFor(menuOpenFor === post.id ? null : post.id)
+                  }
+                  className="shrink-0 text-hub-textDim px-1"
+                >
+                  <MoreIcon />
+                </button>
+              </div>
+
+              {menuOpenFor === post.id && (
+                <div className="absolute right-4 top-12 z-20 w-56 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                  <button
+                    onClick={() => setInterest(post.id, "interested")}
+                    className="flex w-full items-start gap-3 px-3 py-2 text-left"
+                  >
+                    <PlusCircleIcon />
+                    <span>
+                      <span className="block text-xs font-medium text-white">
+                        {interestState[post.id] === "interested" ? "Marked Interested" : "Interested"}
+                      </span>
+                      <span className="block text-[10px] text-hub-textDim">More posts like this</span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setInterest(post.id, "not_interested")}
+                    className="flex w-full items-start gap-3 px-3 py-2 text-left"
+                  >
+                    <MinusCircleIcon />
+                    <span>
+                      <span className="block text-xs font-medium text-white">
+                        {interestState[post.id] === "not_interested" ? "Marked Not interested" : "Not interested"}
+                      </span>
+                      <span className="block text-[10px] text-hub-textDim">Fewer posts like this</span>
+                    </span>
+                  </button>
+                  <div className="my-1 border-t border-hub-border" />
+                  <button
+                    onClick={() => toggleBookmark(post.id)}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <BookmarkIcon filled={!!bookmarked[post.id]} />
+                    {bookmarked[post.id] ? "Saved" : "Save post"}
+                  </button>
+                  <button
+                    onClick={() => sharePost(post)}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <ShareIcon />
+                    Share
+                  </button>
+                  <button
+                    onClick={() => hidePost(post.id)}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <EyeOffIcon />
+                    I don&apos;t want to see this
+                  </button>
+                  <button
+                    onClick={reportPost}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <FlagIcon />
+                    Report post
+                  </button>
+                  <button
+                    onClick={() => toggleNotify(post.id)}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <BellSmallIcon />
+                    {notifyOn[post.id] ? "Turn off notifications" : "Turn on notifications"}
+                  </button>
+                  <button
+                    onClick={() => copyLink(post)}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"
+                  >
+                    <LinkIcon />
+                    Copy link
+                  </button>
+                  {post.user_id === userId && (
+                    <>
+                      <div className="my-1 border-t border-hub-border" />
+                      <button className="block w-full px-3 py-2 text-left text-xs text-red-400">
+                        Delete post
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {post.content && (
+                <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">
+                  {post.content}
+                </p>
+              )}
+
+              {post.image_url && (
+                <img
+                  src={post.image_url}
+                  alt="Post image"
+                  className="mt-3 w-full rounded-lg object-cover"
+                />
+              )}
+
+              {post.video_url && (
+                <video
+                  src={post.video_url}
+                  controls
+                  className="mt-3 w-full rounded-lg"
+                />
+              )}
+
+              <div className="relative mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+                {reactionPickerFor === post.id && (
+                  <div className="absolute bottom-full left-0 z-20 mb-2 flex items-center gap-1 rounded-full border border-hub-border bg-hub-card2 px-2 py-1.5 shadow-lg">
+                    {REACTIONS.map((r) => (
+                      <button
+                        key={r.type}
+                        onClick={() => pickReaction(post.id, r.type)}
+                        className={`text-lg leading-none transition-transform active:scale-125 ${
+                          activeReaction === r.type ? "scale-110" : ""
+                        }`}
+                        aria-label={r.label}
+                      >
+                        {r.emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-5">
+                  <button
+                    onClick={() => toggleReactionButton(post.id)}
+                    className={`flex shrink-0 items-center gap-1.5 text-xs ${
+                      activeReactionInfo ? activeReactionInfo.color : "text-hub-textDim"
+                    }`}
+                  >
+                    {activeReactionInfo ? (
+                      <span className="text-sm leading-none">{activeReactionInfo.emoji}</span>
+                    ) : (
+                      <HeartIcon filled={false} />
+                    )}
+                    <span>{activeReactionInfo ? activeReactionInfo.label : "Like"}</span>
+                  </button>
+                  <button className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
+                    <CommentIcon />
+                    <span>Comment</span>
+                  </button>
+                  <button
+                    onClick={() => sharePost(post)}
+                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
+                  >
+                    <ShareIcon />
+                    <span>Share</span>
+                  </button>
+                </div>
+                <button
+                  onClick={() => toggleBookmark(post.id)}
+                  className={`shrink-0 ${
+                    bookmarked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
                   }`}
                 >
-                  <HeartIcon filled={!!liked[post.id]} />
-                  <span>Like</span>
-                </button>
-                <button className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
-                  <CommentIcon />
-                  <span>Comment</span>
+                  <BookmarkIcon filled={!!bookmarked[post.id]} />
                 </button>
               </div>
-              <button
-                onClick={() => toggleBookmark(post.id)}
-                className={`shrink-0 ${
-                  bookmarked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
-                }`}
-              >
-                <BookmarkIcon filled={!!bookmarked[post.id]} />
-              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <BottomNav />
@@ -447,6 +620,70 @@ function BookmarkIcon({ filled }: { filled: boolean }) {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
       <path d="M6 3h12v18l-6-4-6 4V3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function ShareIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle cx="18" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="6" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="18" cy="19" r="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8.2 10.7l7.6-4.4M8.2 13.3l7.6 4.4" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+function EyeOffIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M3 3l18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M10.6 5.1A10.9 10.9 0 0112 5c5 0 9 4 10 7-.5 1.2-1.5 2.8-3 4.1M6.5 6.6C4.2 8 2.6 10.1 2 12c1 3 5 7 10 7 1.4 0 2.7-.3 3.9-.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M9.5 12a2.5 2.5 0 003.6 2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function FlagIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M5 3v18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M5 4h13l-3 4 3 4H5" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function BellSmallIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function LinkIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M9 15l6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M11 6l1-1a4 4 0 015.7 5.7l-1 1M13 18l-1 1a4 4 0 01-5.7-5.7l1-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PlusCircleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="mt-0.5 shrink-0">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 8v8M8 12h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MinusCircleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="mt-0.5 shrink-0">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 12h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }
