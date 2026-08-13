@@ -82,6 +82,7 @@ export default function DiscoverPage() {
 
     if (error) {
       console.error(error);
+      alert("Load posts failed: " + error.message);
       return;
     }
 
