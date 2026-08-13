@@ -24,7 +24,7 @@ const services: Service[] = [
 const trendingTags = ["#Freshers2026", "#ExamsSZN", "#HostelLife", "#CampusVibes"];
 
 const CAMPUS_GATE_IMAGE_URL =
-  "https://lrzsycbqaxhmikvddese.supabase.co/storage/v1/object/public/marketplace-images/IMG-20260813-WA0037(2).jpg";
+  "https://lrzsycbqaxhmikvddese.supabase.co/storage/v1/object/public/marketplace-images/IMG-20260813-WA0037%282%29.jpg";
 
 function getGreeting() {
   const hour = new Date().getHours();
