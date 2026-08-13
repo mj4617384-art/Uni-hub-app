@@ -21,6 +21,8 @@ const services: Service[] = [
   { label: "Communities", sub: "Join & connect", href: "/communities", icon: <UsersIcon /> },
 ];
 
+const trendingTags = ["#Freshers2026", "#ExamsSZN", "#HostelLife", "#CampusVibes"];
+
 export default function HomePage() {
   const router = useRouter();
   const [firstName, setFirstName] = useState<string | null>(null);
@@ -61,8 +63,14 @@ export default function HomePage() {
         </h1>
         <div className="flex items-center gap-4 text-hub-textDim">
           <SearchIcon />
-          <ChatIcon />
-          <BellIcon />
+          <div className="relative">
+            <BellIcon />
+          </div>
+          <button onClick={() => router.push("/profile")} aria-label="Profile">
+            <div className="h-8 w-8 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+              {firstName ? firstName.charAt(0).toUpperCase() : "U"}
+            </div>
+          </button>
         </div>
       </div>
 
@@ -91,6 +99,31 @@ export default function HomePage() {
               <span className="text-xs text-hub-textDim">{s.sub}</span>
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Trending on Campus */}
+      <div className="mt-6">
+        <div className="mx-5 mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-hub-textDim">Trending on Campus</h2>
+        </div>
+        <div className="flex gap-2 overflow-x-auto px-5 pb-1 scrollbar-hide">
+          {trendingTags.map((tag) => (
+            <span
+              key={tag}
+              className="shrink-0 rounded-full border border-hub-border bg-hub-card px-3 py-1.5 text-xs text-hub-accentLight"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Updates (placeholder until Discover feed is built) */}
+      <div className="mx-5 mt-6">
+        <h2 className="mb-3 text-sm font-medium text-hub-textDim">Recent Updates</h2>
+        <div className="rounded-xl border border-hub-border bg-hub-card p-4 text-sm text-hub-textDim">
+          Campus updates will show up here once Discover is live.
         </div>
       </div>
 
@@ -155,13 +188,6 @@ function SearchIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
       <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-function ChatIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M4 5h16a1 1 0 011 1v10a1 1 0 01-1 1H9l-5 4v-4H4a1 1 0 01-1-1V6a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
     </svg>
   );
 }
