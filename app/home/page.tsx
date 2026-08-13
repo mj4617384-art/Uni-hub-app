@@ -12,6 +12,14 @@ type Service = {
   icon: JSX.Element;
 };
 
+type RecentPost = {
+  id: string;
+  content: string | null;
+  image_url: string | null;
+  created_at: string;
+  first_name?: string;
+};
+
 const services: Service[] = [
   { label: "Errands", sub: "Get things done", href: "/errands", icon: <BriefcaseIcon /> },
   { label: "Marketplace", sub: "Buy & sell", href: "/marketplace", icon: <BagIcon /> },
@@ -33,10 +41,22 @@ function getGreeting() {
   return "Good evening";
 }
 
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [firstName, setFirstName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [recentPosts, setRecentPosts] = useState<RecentPost[]>([]);
 
   useEffect(() => {
     async function loadUser() {
@@ -51,10 +71,33 @@ export default function HomePage() {
         .eq("id", data.user.id)
         .single();
       setFirstName(profile?.first_name ?? null);
+      await loadRecentPosts();
       setLoading(false);
     }
     loadUser();
   }, [router]);
+
+  async function loadRecentPosts() {
+    const { data, error } = await supabase
+      .from("discover_posts")
+      .select("id, content, image_url, created_at, profiles(first_name)")
+      .order("created_at", { ascending: false })
+      .limit(3);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const mapped = (data ?? []).map((p: any) => ({
+      id: p.id,
+      content: p.content,
+      image_url: p.image_url,
+      created_at: p.created_at,
+      first_name: p.profiles?.first_name ?? "Student",
+    }));
+    setRecentPosts(mapped);
+  }
 
   if (loading) {
     return (
@@ -137,7 +180,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Post composer — visual placeholder, wiring to Discover feed comes later */}
+      {/* Post composer */}
       <div className="mx-5 mt-6">
         <div className="rounded-xl border border-hub-border bg-hub-card p-3">
           <button
@@ -179,12 +222,60 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Recent Updates (placeholder until Discover feed is built) */}
+      {/* Recent Updates — now pulled live from Discover */}
       <div className="mx-5 mt-6">
-        <h2 className="mb-3 text-sm font-medium text-hub-textDim">Recent Updates</h2>
-        <div className="rounded-xl border border-hub-border bg-hub-card p-4 text-sm text-hub-textDim">
-          Campus updates will show up here once Discover is live.
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-hub-textDim">Recent Updates</h2>
+          {recentPosts.length > 0 && (
+            <button
+              onClick={() => router.push("/discover")}
+              className="text-xs text-hub-accentLight"
+            >
+              See all
+            </button>
+          )}
         </div>
+
+        {recentPosts.length === 0 ? (
+          <div className="rounded-xl border border-hub-border bg-hub-card p-4 text-sm text-hub-textDim">
+            Campus updates will show up here once someone posts on Discover.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {recentPosts.map((post) => (
+              <button
+                key={post.id}
+                onClick={() => router.push("/discover")}
+                className="flex items-start gap-3 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+              >
+                <div className="h-8 w-8 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+                  {post.first_name?.charAt(0).toUpperCase() ?? "U"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-white">
+                    {post.first_name}
+                    <span className="ml-2 font-normal text-hub-textDim">
+                      {timeAgo(post.created_at)}
+                    </span>
+                  </p>
+                  {post.content && (
+                    <p className="mt-0.5 truncate text-xs text-hub-textDim">
+                      {post.content}
+                    </p>
+                  )}
+                </div>
+                {post.image_url && (
+                  <img
+                    src={post.image_url}
+                    alt=""
+                    loading="lazy"
+                    className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                  />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <BottomNav />
