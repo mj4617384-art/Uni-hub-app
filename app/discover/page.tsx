@@ -50,6 +50,7 @@ export default function DiscoverPage() {
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [bookmarked, setBookmarked] = useState<Record<string, boolean>>({});
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -95,6 +96,7 @@ export default function DiscoverPage() {
   async function handlePost() {
     if (!userId || (!content.trim() && !imageFile && !videoFile)) return;
     setPosting(true);
+    setUploadError(null);
 
     let image_url: string | null = null;
     let video_url: string | null = null;
@@ -105,7 +107,7 @@ export default function DiscoverPage() {
         .from("discover-images")
         .upload(path, imageFile);
       if (upErr) {
-        alert("Image upload failed: " + upErr.message);
+        setUploadError("Image upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
@@ -121,7 +123,7 @@ export default function DiscoverPage() {
         .from("discover-videos")
         .upload(path, videoFile);
       if (upErr) {
-        alert("Video upload failed: " + upErr.message);
+        setUploadError("Video upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
@@ -142,7 +144,7 @@ export default function DiscoverPage() {
     });
 
     if (error) {
-      alert("Post failed: " + error.message);
+      setUploadError("Post failed: " + error.message);
       setPosting(false);
       return;
     }
@@ -177,7 +179,6 @@ export default function DiscoverPage() {
       <div className="px-5 pt-5">
         <h1 className="text-xl font-semibold text-white">Discover</h1>
 
-        {/* Tabs */}
         <div className="mt-4 flex gap-5 overflow-x-auto border-b border-hub-border pb-2 scrollbar-hide">
           {tabs.map((tab) => (
             <button
@@ -195,7 +196,6 @@ export default function DiscoverPage() {
         </div>
       </div>
 
-      {/* Composer — only on For You */}
       {activeTab === "For You" && (
         <div className="mx-5 mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
           <div className="flex items-start gap-3">
@@ -213,19 +213,25 @@ export default function DiscoverPage() {
 
           {imageFile && (
             <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-              📷 {imageFile.name}
-              <button onClick={() => setImageFile(null)} className="text-red-400">
+              <PhotoIcon />
+              <span>{imageFile.name}</span>
+              <button onClick={() => setImageFile(null)} className="text-red-400 shrink-0">
                 Remove
               </button>
             </div>
           )}
           {videoFile && (
             <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-              🎥 {videoFile.name}
-              <button onClick={() => setVideoFile(null)} className="text-red-400">
+              <VideoIcon />
+              <span>{videoFile.name}</span>
+              <button onClick={() => setVideoFile(null)} className="text-red-400 shrink-0">
                 Remove
               </button>
             </div>
+          )}
+
+          {uploadError && (
+            <p className="mt-2 text-xs text-red-400">{uploadError}</p>
           )}
 
           <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
@@ -233,9 +239,10 @@ export default function DiscoverPage() {
               <button
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                className="flex items-center gap-1.5 text-xs text-hub-textDim"
+                className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
               >
-                📷 Photo
+                <PhotoIcon />
+                <span>Photo</span>
               </button>
               <input
                 ref={imageInputRef}
@@ -249,9 +256,10 @@ export default function DiscoverPage() {
               <button
                 type="button"
                 onClick={() => videoInputRef.current?.click()}
-                className="flex items-center gap-1.5 text-xs text-hub-textDim"
+                className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
               >
-                🎥 Video
+                <VideoIcon />
+                <span>Video</span>
               </button>
               <input
                 ref={videoInputRef}
@@ -266,7 +274,7 @@ export default function DiscoverPage() {
             <button
               onClick={handlePost}
               disabled={posting || (!content.trim() && !imageFile && !videoFile)}
-              className="rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
             >
               {posting ? "Posting..." : "Post"}
             </button>
@@ -274,7 +282,6 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {/* Feed */}
       <div className="mx-5 mt-6 flex flex-col gap-4">
         {activeTab !== "For You" && (
           <p className="text-center text-sm text-hub-textDim">
@@ -310,9 +317,9 @@ export default function DiscoverPage() {
                 onClick={() =>
                   setMenuOpenFor(menuOpenFor === post.id ? null : post.id)
                 }
-                className="text-hub-textDim px-1"
+                className="shrink-0 text-hub-textDim px-1"
               >
-                ⋯
+                <MoreIcon />
               </button>
             </div>
 
@@ -355,23 +362,25 @@ export default function DiscoverPage() {
               <div className="flex items-center gap-5">
                 <button
                   onClick={() => toggleLike(post.id)}
-                  className={`flex items-center gap-1.5 text-xs ${
+                  className={`flex shrink-0 items-center gap-1.5 text-xs ${
                     liked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
                   }`}
                 >
-                  {liked[post.id] ? "❤️" : "🤍"} Like
+                  <HeartIcon filled={!!liked[post.id]} />
+                  <span>Like</span>
                 </button>
-                <button className="flex items-center gap-1.5 text-xs text-hub-textDim">
-                  💬 Comment
+                <button className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
+                  <CommentIcon />
+                  <span>Comment</span>
                 </button>
               </div>
               <button
                 onClick={() => toggleBookmark(post.id)}
-                className={`text-sm ${
+                className={`shrink-0 ${
                   bookmarked[post.id] ? "text-hub-accentLight" : "text-hub-textDim"
                 }`}
               >
-                {bookmarked[post.id] ? "🔖" : "🏷️"}
+                <BookmarkIcon filled={!!bookmarked[post.id]} />
               </button>
             </div>
           </div>
@@ -380,5 +389,63 @@ export default function DiscoverPage() {
 
       <BottomNav />
     </main>
+  );
+}
+
+function PhotoIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="9" cy="10" r="1.8" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3 16l5-5 4 4 3-3 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function VideoIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="6" width="13" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 10l5-3v10l-5-3" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function MoreIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+function HeartIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
+      <path
+        d="M12 20s-7-4.35-9.5-8.5C.7 8 2.5 4.5 6 4.5c2 0 3.5 1.2 6 3.5 2.5-2.3 4-3.5 6-3.5 3.5 0 5.3 3.5 3.5 7C19 15.65 12 20 12 20z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function CommentIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 4h16v12H8l-4 4V4z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+function BookmarkIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
+      <path d="M6 3h12v18l-6-4-6 4V3z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
   );
 }
