@@ -11,6 +11,8 @@ type Post = {
   content: string | null;
   image_url: string | null;
   video_url: string | null;
+  image_urls?: string[] | null;
+  video_urls?: string[] | null;
   hashtags: string[];
   created_at: string;
   first_name?: string;
@@ -45,6 +47,8 @@ type SportsUpdate = {
   title: string;
   description: string | null;
   image_url: string | null;
+  image_urls?: string[] | null;
+  video_urls?: string[] | null;
   category: string;
   created_at: string;
   first_name?: string;
@@ -74,6 +78,7 @@ const REACTION_BOTTOM = REACTIONS.slice(3);
 
 const tabs = ["For You", "Following", "Sports", "News", "Clubs"];
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+const MAX_MEDIA_PER_TYPE = 5;
 
 const SPORTS_CATEGORY_OPTIONS = [
   "Football",
@@ -136,6 +141,101 @@ function reactionSummaryText(records: ReactionRecord[], userId: string | null) {
   return rest > 0 ? `${first.first_name} and ${rest} other${rest > 1 ? "s" : ""} reacted` : `${first.first_name} reacted`;
 }
 
+function MediaCarousel({ images, videos, registerVideoRef }: { images: string[]; videos: string[]; registerVideoRef?: (el: HTMLVideoElement | null) => void }) {
+  const items = [...images.map((u) => ({ type: "image" as const, url: u })), ...videos.map((u) => ({ type: "video" as const, url: u }))];
+  if (items.length === 0) return null;
+  if (items.length === 1) {
+    const item = items[0];
+    return (
+      <div className="-mx-4 mt-3 overflow-hidden bg-black">
+        {item.type === "image" ? (
+          <img src={item.url} alt="Post media" loading="lazy" className="block w-full object-cover" style={{ borderRadius: 0 }} />
+        ) : (
+          <video ref={registerVideoRef} src={item.url} controls preload="metadata" className="block w-full" style={{ borderRadius: 0 }} />
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="-mx-4 mt-3 flex gap-1 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
+      {items.map((item, i) => (
+        <div key={i} className="shrink-0 w-[92%] snap-center overflow-hidden bg-black">
+          {item.type === "image" ? (
+            <img src={item.url} alt={`Post media ${i + 1}`} loading="lazy" className="block h-64 w-full object-cover" style={{ borderRadius: 0 }} />
+          ) : (
+            <video ref={registerVideoRef} src={item.url} controls preload="metadata" className="block h-64 w-full object-cover" style={{ borderRadius: 0 }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MediaPicker({
+  images,
+  videos,
+  onAddImages,
+  onAddVideos,
+  onRemoveImage,
+  onRemoveVideo,
+  imageInputRef,
+  videoInputRef,
+}: {
+  images: File[];
+  videos: File[];
+  onAddImages: (files: File[]) => void;
+  onAddVideos: (files: File[]) => void;
+  onRemoveImage: (i: number) => void;
+  onRemoveVideo: (i: number) => void;
+  imageInputRef: React.RefObject<HTMLInputElement>;
+  videoInputRef: React.RefObject<HTMLInputElement>;
+}) {
+  return (
+    <>
+      {(images.length > 0 || videos.length > 0) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {images.map((f, i) => (
+            <div key={`img-${i}`} className="flex items-center gap-1 rounded-md bg-hub-card2 px-2 py-1 text-[10px] text-hub-textDim">
+              <PhotoIcon />
+              <span className="max-w-[90px] truncate">{f.name}</span>
+              <button onClick={() => onRemoveImage(i)} className="text-red-400">×</button>
+            </div>
+          ))}
+          {videos.map((f, i) => (
+            <div key={`vid-${i}`} className="flex items-center gap-1 rounded-md bg-hub-card2 px-2 py-1 text-[10px] text-hub-textDim">
+              <VideoIcon />
+              <span className="max-w-[90px] truncate">{f.name}</span>
+              <button onClick={() => onRemoveVideo(i)} className="text-red-400">×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) onAddImages(Array.from(e.target.files));
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) onAddVideos(Array.from(e.target.files));
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
+}
+
 export default function DiscoverPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -143,8 +243,8 @@ export default function DiscoverPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [content, setContent] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [videoFiles, setVideoFiles] = useState<File[]>([]);
   const [posting, setPosting] = useState(false);
   const [activeTab, setActiveTab] = useState("For You");
 
@@ -177,11 +277,14 @@ export default function DiscoverPage() {
   const [sportsDescription, setSportsDescription] = useState("");
   const [sportsCategory, setSportsCategory] = useState("");
   const [sportsCategoryFocused, setSportsCategoryFocused] = useState(false);
-  const [sportsImageFile, setSportsImageFile] = useState<File | null>(null);
+  const [sportsImageFiles, setSportsImageFiles] = useState<File[]>([]);
+  const [sportsVideoFiles, setSportsVideoFiles] = useState<File[]>([]);
   const [sportsPosting, setSportsPosting] = useState(false);
   const [sportsUploadError, setSportsUploadError] = useState<string | null>(null);
   const sportsImageInputRef = useRef<HTMLInputElement>(null);
+  const sportsVideoInputRef = useRef<HTMLInputElement>(null);
   const sportsCategoryScopeRef = useRef<HTMLDivElement | null>(null);
+  const [sportsDeletingId, setSportsDeletingId] = useState<string | null>(null);
 
   const [sportsReactionsByUpdate, setSportsReactionsByUpdate] = useState<Record<string, ReactionRecord[]>>({});
   const [sportsReactionPickerFor, setSportsReactionPickerFor] = useState<string | null>(null);
@@ -198,6 +301,8 @@ export default function DiscoverPage() {
 
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const sportsMenuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [sportsMenuOpenFor, setSportsMenuOpenFor] = useState<string | null>(null);
 
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
 
@@ -230,6 +335,10 @@ export default function DiscoverPage() {
         const scope = menuScopeRefs.current[menuOpenFor];
         if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
       }
+      if (sportsMenuOpenFor) {
+        const scope = sportsMenuScopeRefs.current[sportsMenuOpenFor];
+        if (scope && !scope.contains(e.target as Node)) setSportsMenuOpenFor(null);
+      }
       if (sportsReactionPickerFor) {
         const scope = sportsReactionScopeRefs.current[sportsReactionPickerFor];
         if (scope && !scope.contains(e.target as Node)) setSportsReactionPickerFor(null);
@@ -241,7 +350,7 @@ export default function DiscoverPage() {
     }
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
-  }, [reactionPickerFor, menuOpenFor, sportsReactionPickerFor, sportsCategoryFocused]);
+  }, [reactionPickerFor, menuOpenFor, sportsMenuOpenFor, sportsReactionPickerFor, sportsCategoryFocused]);
 
   useEffect(() => {
     async function init() {
@@ -413,36 +522,49 @@ export default function DiscoverPage() {
     }
   }
 
+  function addDiscoverImages(files: File[]) {
+    setImageFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function addDiscoverVideos(files: File[]) {
+    setVideoFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function removeDiscoverImage(i: number) {
+    setImageFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function removeDiscoverVideo(i: number) {
+    setVideoFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
   async function handlePost() {
-    if (!userId || (!content.trim() && !imageFile && !videoFile)) return;
+    if (!userId || (!content.trim() && imageFiles.length === 0 && videoFiles.length === 0)) return;
     setPosting(true);
     setUploadError(null);
 
-    let image_url: string | null = null;
-    let video_url: string | null = null;
+    const image_urls: string[] = [];
+    const video_urls: string[] = [];
 
-    if (imageFile) {
-      const path = `${userId}/${Date.now()}-${imageFile.name}`;
-      const { error: upErr } = await supabase.storage.from("discover-images").upload(path, imageFile);
+    for (const file of imageFiles) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("discover-images").upload(path, file);
       if (upErr) {
         setUploadError("Image upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
       const { data: urlData } = supabase.storage.from("discover-images").getPublicUrl(path);
-      image_url = urlData.publicUrl;
+      image_urls.push(urlData.publicUrl);
     }
 
-    if (videoFile) {
-      const path = `${userId}/${Date.now()}-${videoFile.name}`;
-      const { error: upErr } = await supabase.storage.from("discover-videos").upload(path, videoFile);
+    for (const file of videoFiles) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("discover-videos").upload(path, file);
       if (upErr) {
         setUploadError("Video upload failed: " + upErr.message);
         setPosting(false);
         return;
       }
       const { data: urlData } = supabase.storage.from("discover-videos").getPublicUrl(path);
-      video_url = urlData.publicUrl;
+      video_urls.push(urlData.publicUrl);
     }
 
     const hashtags = extractHashtags(content);
@@ -450,8 +572,10 @@ export default function DiscoverPage() {
     const { error } = await supabase.from("discover_posts").insert({
       user_id: userId,
       content: content.trim() || null,
-      image_url,
-      video_url,
+      image_url: image_urls[0] ?? null,
+      video_url: video_urls[0] ?? null,
+      image_urls,
+      video_urls,
       hashtags,
     });
 
@@ -462,8 +586,8 @@ export default function DiscoverPage() {
     }
 
     setContent("");
-    setImageFile(null);
-    setVideoFile(null);
+    setImageFiles([]);
+    setVideoFiles([]);
     await loadPosts();
     setPosting(false);
   }
@@ -808,30 +932,58 @@ export default function DiscoverPage() {
     return SPORTS_CATEGORY_OPTIONS.filter((c) => c.toLowerCase().includes(q));
   }
 
+  function addSportsImages(files: File[]) {
+    setSportsImageFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function addSportsVideos(files: File[]) {
+    setSportsVideoFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function removeSportsImage(i: number) {
+    setSportsImageFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function removeSportsVideo(i: number) {
+    setSportsVideoFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
   async function handleSportsPost() {
     if (!userId || !sportsTitle.trim() || !sportsCategory.trim()) return;
     setSportsPosting(true);
     setSportsUploadError(null);
 
-    let image_url: string | null = null;
+    const image_urls: string[] = [];
+    const video_urls: string[] = [];
 
-    if (sportsImageFile) {
-      const path = `${userId}/${Date.now()}-${sportsImageFile.name}`;
-      const { error: upErr } = await supabase.storage.from("sports-images").upload(path, sportsImageFile);
+    for (const file of sportsImageFiles) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("sports-images").upload(path, file);
       if (upErr) {
         setSportsUploadError("Image upload failed: " + upErr.message);
         setSportsPosting(false);
         return;
       }
       const { data: urlData } = supabase.storage.from("sports-images").getPublicUrl(path);
-      image_url = urlData.publicUrl;
+      image_urls.push(urlData.publicUrl);
+    }
+
+    for (const file of sportsVideoFiles) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("sports-videos").upload(path, file);
+      if (upErr) {
+        setSportsUploadError("Video upload failed: " + upErr.message);
+        setSportsPosting(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from("sports-videos").getPublicUrl(path);
+      video_urls.push(urlData.publicUrl);
     }
 
     const { error } = await supabase.from("sports_updates").insert({
       user_id: userId,
       title: sportsTitle.trim(),
       description: sportsDescription.trim() || null,
-      image_url,
+      image_url: image_urls[0] ?? null,
+      image_urls,
+      video_urls,
       category: sportsCategory.trim(),
     });
 
@@ -844,9 +996,42 @@ export default function DiscoverPage() {
     setSportsTitle("");
     setSportsDescription("");
     setSportsCategory("");
-    setSportsImageFile(null);
+    setSportsImageFiles([]);
+    setSportsVideoFiles([]);
     await loadSportsUpdates();
     setSportsPosting(false);
+  }
+
+  async function handleDeleteSportsUpdate(updateId: string) {
+    if (!userId) return;
+    if (!window.confirm("Delete this update? This can't be undone.")) return;
+
+    setSportsDeletingId(updateId);
+    const { error } = await supabase.from("sports_updates").delete().eq("id", updateId).eq("user_id", userId);
+    setSportsDeletingId(null);
+    setSportsMenuOpenFor(null);
+
+    if (error) {
+      alert("Delete failed: " + error.message);
+      return;
+    }
+    setSportsUpdates((prev) => prev.filter((s) => s.id !== updateId));
+  }
+
+  async function shareSportsUpdate(update: SportsUpdate) {
+    const url = `${window.location.origin}/discover?sport=${update.id}`;
+    const text = update.title;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Uni.hub Sports", text, url });
+      } catch {
+        // cancelled
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard");
+    }
+    setSportsMenuOpenFor(null);
   }
 
   if (loading) {
@@ -899,36 +1084,40 @@ export default function DiscoverPage() {
             />
           </div>
 
-          {imageFile && (
-            <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-              <PhotoIcon />
-              <span>{imageFile.name}</span>
-              <button onClick={() => setImageFile(null)} className="text-red-400 shrink-0">Remove</button>
-            </div>
-          )}
-          {videoFile && (
-            <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-              <VideoIcon />
-              <span>{videoFile.name}</span>
-              <button onClick={() => setVideoFile(null)} className="text-red-400 shrink-0">Remove</button>
-            </div>
-          )}
+          <MediaPicker
+            images={imageFiles}
+            videos={videoFiles}
+            onAddImages={addDiscoverImages}
+            onAddVideos={addDiscoverVideos}
+            onRemoveImage={removeDiscoverImage}
+            onRemoveVideo={removeDiscoverVideo}
+            imageInputRef={imageInputRef}
+            videoInputRef={videoInputRef}
+          />
           {uploadError && <p className="mt-2 text-xs text-red-400">{uploadError}</p>}
 
           <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
             <div className="flex items-center gap-5">
-              <button type="button" onClick={() => imageInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
-                <PhotoIcon /><span>Photo</span>
+              <button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={imageFiles.length >= MAX_MEDIA_PER_TYPE}
+                className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+              >
+                <PhotoIcon /><span>Photo {imageFiles.length > 0 ? `(${imageFiles.length}/5)` : ""}</span>
               </button>
-              <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setImageFile(e.target.files[0]); }} />
-              <button type="button" onClick={() => videoInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
-                <VideoIcon /><span>Video</span>
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                disabled={videoFiles.length >= MAX_MEDIA_PER_TYPE}
+                className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+              >
+                <VideoIcon /><span>Video {videoFiles.length > 0 ? `(${videoFiles.length}/5)` : ""}</span>
               </button>
-              <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setVideoFile(e.target.files[0]); }} />
             </div>
             <button
               onClick={handlePost}
-              disabled={posting || (!content.trim() && !imageFile && !videoFile)}
+              disabled={posting || (!content.trim() && imageFiles.length === 0 && videoFiles.length === 0)}
               className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
             >
               {posting ? "Posting..." : "Post"}
@@ -982,20 +1171,37 @@ export default function DiscoverPage() {
                 )}
               </div>
 
-              {sportsImageFile && (
-                <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-                  <PhotoIcon />
-                  <span>{sportsImageFile.name}</span>
-                  <button onClick={() => setSportsImageFile(null)} className="text-red-400 shrink-0">Remove</button>
-                </div>
-              )}
+              <MediaPicker
+                images={sportsImageFiles}
+                videos={sportsVideoFiles}
+                onAddImages={addSportsImages}
+                onAddVideos={addSportsVideos}
+                onRemoveImage={removeSportsImage}
+                onRemoveVideo={removeSportsVideo}
+                imageInputRef={sportsImageInputRef}
+                videoInputRef={sportsVideoInputRef}
+              />
               {sportsUploadError && <p className="mt-2 text-xs text-red-400">{sportsUploadError}</p>}
 
               <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-                <button type="button" onClick={() => sportsImageInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
-                  <PhotoIcon /><span>Photo</span>
-                </button>
-                <input ref={sportsImageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setSportsImageFile(e.target.files[0]); }} />
+                <div className="flex items-center gap-5">
+                  <button
+                    type="button"
+                    onClick={() => sportsImageInputRef.current?.click()}
+                    disabled={sportsImageFiles.length >= MAX_MEDIA_PER_TYPE}
+                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+                  >
+                    <PhotoIcon /><span>Photo {sportsImageFiles.length > 0 ? `(${sportsImageFiles.length}/5)` : ""}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => sportsVideoInputRef.current?.click()}
+                    disabled={sportsVideoFiles.length >= MAX_MEDIA_PER_TYPE}
+                    className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+                  >
+                    <VideoIcon /><span>Video {sportsVideoFiles.length > 0 ? `(${sportsVideoFiles.length}/5)` : ""}</span>
+                  </button>
+                </div>
                 <button
                   onClick={handleSportsPost}
                   disabled={sportsPosting || !sportsTitle.trim() || !sportsCategory.trim()}
@@ -1015,6 +1221,14 @@ export default function DiscoverPage() {
             <SportsCard
               update={trendingSportsUpdate}
               userId={userId}
+              isMine={trendingSportsUpdate.user_id === userId}
+              deleting={sportsDeletingId === trendingSportsUpdate.id}
+              menuOpen={sportsMenuOpenFor === trendingSportsUpdate.id}
+              onToggleMenu={() => setSportsMenuOpenFor(sportsMenuOpenFor === trendingSportsUpdate.id ? null : trendingSportsUpdate.id)}
+              menuScopeRef={(el) => { sportsMenuScopeRefs.current[trendingSportsUpdate.id] = el; }}
+              onDelete={() => handleDeleteSportsUpdate(trendingSportsUpdate.id)}
+              onShare={() => shareSportsUpdate(trendingSportsUpdate)}
+              registerVideoRef={registerVideoRef}
               reactions={sportsReactionsByUpdate[trendingSportsUpdate.id] || []}
               reactionPickerOpen={sportsReactionPickerFor === trendingSportsUpdate.id}
               reacting={sportsReactingId === trendingSportsUpdate.id}
@@ -1050,6 +1264,14 @@ export default function DiscoverPage() {
               key={s.id}
               update={s}
               userId={userId}
+              isMine={s.user_id === userId}
+              deleting={sportsDeletingId === s.id}
+              menuOpen={sportsMenuOpenFor === s.id}
+              onToggleMenu={() => setSportsMenuOpenFor(sportsMenuOpenFor === s.id ? null : s.id)}
+              menuScopeRef={(el) => { sportsMenuScopeRefs.current[s.id] = el; }}
+              onDelete={() => handleDeleteSportsUpdate(s.id)}
+              onShare={() => shareSportsUpdate(s)}
+              registerVideoRef={registerVideoRef}
               reactions={sportsReactionsByUpdate[s.id] || []}
               reactionPickerOpen={sportsReactionPickerFor === s.id}
               reacting={sportsReactingId === s.id}
@@ -1092,6 +1314,8 @@ export default function DiscoverPage() {
           const repliesOf = (id: string) => allComments.filter((c) => c.parent_id === id);
           const isMine = post.user_id === userId;
           const currentReply = replyTo[post.id];
+          const images = post.image_urls && post.image_urls.length > 0 ? post.image_urls : post.image_url ? [post.image_url] : [];
+          const videos = post.video_urls && post.video_urls.length > 0 ? post.video_urls : post.video_url ? [post.video_url] : [];
 
           return (
             <div key={post.id} className="relative border-b border-hub-border bg-hub-card px-4 py-3">
@@ -1164,23 +1388,7 @@ export default function DiscoverPage() {
                 <p className="mt-3 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(post.content)}</p>
               )}
 
-              {post.image_url && (
-                <div className="-mx-4 mt-3 overflow-hidden">
-                  <img src={post.image_url} alt="Post image" loading="lazy" className="block w-full object-cover" style={{ borderRadius: 0 }} />
-                </div>
-              )}
-              {post.video_url && (
-                <div className="-mx-4 mt-3 overflow-hidden bg-black">
-                  <video
-                    ref={registerVideoRef}
-                    src={post.video_url}
-                    controls
-                    preload="metadata"
-                    className="block w-full"
-                    style={{ borderRadius: 0 }}
-                  />
-                </div>
-              )}
+              <MediaCarousel images={images} videos={videos} registerVideoRef={registerVideoRef} />
 
               {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
@@ -1358,6 +1566,14 @@ function CommentRow({
 function SportsCard({
   update,
   userId,
+  isMine,
+  deleting,
+  menuOpen,
+  onToggleMenu,
+  menuScopeRef,
+  onDelete,
+  onShare,
+  registerVideoRef,
   reactions,
   reactionPickerOpen,
   reacting,
@@ -1380,6 +1596,14 @@ function SportsCard({
 }: {
   update: SportsUpdate;
   userId: string | null;
+  isMine: boolean;
+  deleting: boolean;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  menuScopeRef: (el: HTMLDivElement | null) => void;
+  onDelete: () => void;
+  onShare: () => void;
+  registerVideoRef?: (el: HTMLVideoElement | null) => void;
   reactions: ReactionRecord[];
   reactionPickerOpen: boolean;
   reacting: boolean;
@@ -1405,29 +1629,47 @@ function SportsCard({
   const summaryText = reactionSummaryText(reactions, userId);
   const topLevel = comments.filter((c) => !c.parent_id);
   const repliesOf = (id: string) => comments.filter((c) => c.parent_id === id);
+  const images = update.image_urls && update.image_urls.length > 0 ? update.image_urls : update.image_url ? [update.image_url] : [];
+  const videos = update.video_urls && update.video_urls.length > 0 ? update.video_urls : [];
 
   return (
     <div className="relative border-b border-hub-border bg-hub-card px-4 py-3">
-      <div className="flex items-center gap-3">
-        <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-          {update.first_name?.charAt(0).toUpperCase() ?? "U"}
+      <div ref={menuScopeRef} className="relative">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+              {update.first_name?.charAt(0).toUpperCase() ?? "U"}
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white">{update.first_name}</p>
+              <p className="text-xs text-hub-textDim">{timeAgo(update.created_at)} · {update.category}</p>
+            </div>
+          </div>
+          <button onClick={onToggleMenu} className="shrink-0 text-hub-textDim px-1">
+            <MoreIcon />
+          </button>
         </div>
-        <div>
-          <p className="text-sm font-medium text-white">{update.first_name}</p>
-          <p className="text-xs text-hub-textDim">{timeAgo(update.created_at)} · {update.category}</p>
-        </div>
+
+        {menuOpen && (
+          <div className="absolute right-0 top-12 z-20 w-48 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+            <button onClick={onShare} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+              <ShareIcon />Share
+            </button>
+            {isMine && (
+              <button onClick={onDelete} disabled={deleting} className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40">
+                {deleting ? "Deleting..." : "Delete update"}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      <p className="mt-3 text-sm font-semibold text-white">{update.title}</p>
+      <p className="mt-3 text-sm font-semibold text-white">{linkifyContent(update.title)}</p>
       {update.description && (
-        <p className="mt-1 text-sm text-white/90 whitespace-pre-wrap">{update.description}</p>
+        <p className="mt-1 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(update.description)}</p>
       )}
 
-      {update.image_url && (
-        <div className="-mx-4 mt-3 overflow-hidden">
-          <img src={update.image_url} alt={update.title} loading="lazy" className="block w-full object-cover" style={{ borderRadius: 0 }} />
-        </div>
-      )}
+      <MediaCarousel images={images} videos={videos} registerVideoRef={registerVideoRef} />
 
       {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
@@ -1482,6 +1724,9 @@ function SportsCard({
           <button onClick={onToggleComments} className="flex items-center gap-1.5 text-xs text-hub-textDim">
             <CommentIcon />
             {comments.length > 0 && <span>{comments.length}</span>}
+          </button>
+          <button onClick={onShare} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+            <ShareIcon />
           </button>
         </div>
       </div>
