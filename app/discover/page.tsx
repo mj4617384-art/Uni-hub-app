@@ -30,6 +30,15 @@ type Comment = {
   first_name?: string;
 };
 
+// Minimal shape shared by Discover comments and Sports comments, so one
+// CommentRow component can render either.
+type CommentLikeShape = {
+  id: string;
+  first_name?: string;
+  content: string;
+  created_at: string;
+};
+
 type SportsUpdate = {
   id: string;
   user_id: string;
@@ -45,6 +54,7 @@ type SportsComment = {
   id: string;
   sports_update_id: string;
   user_id: string;
+  parent_id: string | null;
   content: string;
   created_at: string;
   first_name?: string;
@@ -179,9 +189,11 @@ export default function DiscoverPage() {
   const sportsReactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const [sportsCommentsByUpdate, setSportsCommentsByUpdate] = useState<Record<string, SportsComment[]>>({});
+  const [sportsCommentLikes, setSportsCommentLikes] = useState<Record<string, { count: number; mine: boolean }>>({});
   const [sportsCommentOpenFor, setSportsCommentOpenFor] = useState<string | null>(null);
   const [sportsCommentDraft, setSportsCommentDraft] = useState<Record<string, string>>({});
   const [sportsCommentPosting, setSportsCommentPosting] = useState<string | null>(null);
+  const [sportsReplyTo, setSportsReplyTo] = useState<Record<string, { commentId: string; name: string } | null>>({});
   const sportsCommentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -679,11 +691,14 @@ export default function DiscoverPage() {
       return;
     }
     const grouped: Record<string, SportsComment[]> = {};
+    const allIds: string[] = [];
     (data ?? []).forEach((c: any) => {
       if (!grouped[c.sports_update_id]) grouped[c.sports_update_id] = [];
       grouped[c.sports_update_id].push({ ...c, first_name: c.profiles?.first_name ?? "Student" });
+      allIds.push(c.id);
     });
     setSportsCommentsByUpdate((prev) => ({ ...prev, ...grouped }));
+    if (allIds.length > 0) await loadSportsCommentLikes(allIds);
   }
 
   async function refreshSportsCommentsForUpdate(updateId: string) {
@@ -698,6 +713,68 @@ export default function DiscoverPage() {
     }
     const mapped = (data ?? []).map((c: any) => ({ ...c, first_name: c.profiles?.first_name ?? "Student" }));
     setSportsCommentsByUpdate((prev) => ({ ...prev, [updateId]: mapped }));
+    const ids = mapped.map((c) => c.id);
+    if (ids.length > 0) await loadSportsCommentLikes(ids);
+  }
+
+  async function loadSportsCommentLikes(commentIds: string[]) {
+    const { data, error } = await supabase
+      .from("sports_update_comment_likes")
+      .select("comment_id, user_id")
+      .in("comment_id", commentIds);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setSportsCommentLikes((prev) => {
+      const next = { ...prev };
+      commentIds.forEach((id) => {
+        next[id] = { count: 0, mine: false };
+      });
+      (data ?? []).forEach((row: any) => {
+        if (!next[row.comment_id]) next[row.comment_id] = { count: 0, mine: false };
+        next[row.comment_id].count += 1;
+        if (row.user_id === userId) next[row.comment_id].mine = true;
+      });
+      return next;
+    });
+  }
+
+  async function toggleSportsCommentLike(commentId: string) {
+    if (!userId) return;
+    const current = sportsCommentLikes[commentId] || { count: 0, mine: false };
+
+    if (current.mine) {
+      setSportsCommentLikes((prev) => ({ ...prev, [commentId]: { count: Math.max(0, current.count - 1), mine: false } }));
+      const { error } = await supabase
+        .from("sports_update_comment_likes")
+        .delete()
+        .eq("comment_id", commentId)
+        .eq("user_id", userId);
+      if (error) {
+        setSportsCommentLikes((prev) => ({ ...prev, [commentId]: current }));
+        alert("Unlike failed: " + error.message);
+      }
+    } else {
+      setSportsCommentLikes((prev) => ({ ...prev, [commentId]: { count: current.count + 1, mine: true } }));
+      const { error } = await supabase
+        .from("sports_update_comment_likes")
+        .insert({ comment_id: commentId, user_id: userId });
+      if (error) {
+        setSportsCommentLikes((prev) => ({ ...prev, [commentId]: current }));
+        alert("Like failed: " + error.message);
+      }
+    }
+  }
+
+  function startSportsReply(updateId: string, commentId: string, name: string) {
+    setSportsReplyTo((prev) => ({ ...prev, [updateId]: { commentId, name } }));
+    setSportsCommentOpenFor(updateId);
+    setTimeout(() => sportsCommentInputRefs.current[updateId]?.focus(), 0);
+  }
+
+  function cancelSportsReply(updateId: string) {
+    setSportsReplyTo((prev) => ({ ...prev, [updateId]: null }));
   }
 
   async function submitSportsComment(updateId: string) {
@@ -706,9 +783,11 @@ export default function DiscoverPage() {
     if (!text) return;
 
     setSportsCommentPosting(updateId);
+    const parentId = sportsReplyTo[updateId]?.commentId ?? null;
     const { error } = await supabase.from("sports_update_comments").insert({
       sports_update_id: updateId,
       user_id: userId,
+      parent_id: parentId,
       content: text,
     });
     setSportsCommentPosting(null);
@@ -719,6 +798,7 @@ export default function DiscoverPage() {
     }
 
     setSportsCommentDraft((prev) => ({ ...prev, [updateId]: "" }));
+    setSportsReplyTo((prev) => ({ ...prev, [updateId]: null }));
     await refreshSportsCommentsForUpdate(updateId);
   }
 
@@ -931,7 +1011,6 @@ export default function DiscoverPage() {
             )}
           </div>
 
-          {/* Trending Sports — lapped, edge-to-edge, same treatment as a Discover post */}
           {trendingSportsUpdate && (
             <SportsCard
               update={trendingSportsUpdate}
@@ -942,14 +1021,18 @@ export default function DiscoverPage() {
               onToggleReactionPicker={() => toggleSportsReactionButton(trendingSportsUpdate.id)}
               onPickReaction={(type) => pickSportsReaction(trendingSportsUpdate.id, type)}
               scopeRef={(el) => { sportsReactionScopeRefs.current[trendingSportsUpdate.id] = el; }}
-              registerVideoRef={registerVideoRef}
               comments={sportsCommentsByUpdate[trendingSportsUpdate.id] || []}
+              commentLikes={sportsCommentLikes}
               commentsOpen={sportsCommentOpenFor === trendingSportsUpdate.id}
               commentDraft={sportsCommentDraft[trendingSportsUpdate.id] || ""}
               commentPosting={sportsCommentPosting === trendingSportsUpdate.id}
+              currentReply={sportsReplyTo[trendingSportsUpdate.id] ?? null}
               onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === trendingSportsUpdate.id ? null : trendingSportsUpdate.id)}
               onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [trendingSportsUpdate.id]: v }))}
               onSubmitComment={() => submitSportsComment(trendingSportsUpdate.id)}
+              onToggleCommentLike={toggleSportsCommentLike}
+              onStartReply={(commentId, name) => startSportsReply(trendingSportsUpdate.id, commentId, name)}
+              onCancelReply={() => cancelSportsReply(trendingSportsUpdate.id)}
               inputRef={(el) => { sportsCommentInputRefs.current[trendingSportsUpdate.id] = el; }}
             />
           )}
@@ -962,7 +1045,6 @@ export default function DiscoverPage() {
             )}
           </div>
 
-          {/* Recent Updates — lapped list, no gaps, matches Discover feed */}
           {recentSportsUpdates.map((s) => (
             <SportsCard
               key={s.id}
@@ -974,14 +1056,18 @@ export default function DiscoverPage() {
               onToggleReactionPicker={() => toggleSportsReactionButton(s.id)}
               onPickReaction={(type) => pickSportsReaction(s.id, type)}
               scopeRef={(el) => { sportsReactionScopeRefs.current[s.id] = el; }}
-              registerVideoRef={registerVideoRef}
               comments={sportsCommentsByUpdate[s.id] || []}
+              commentLikes={sportsCommentLikes}
               commentsOpen={sportsCommentOpenFor === s.id}
               commentDraft={sportsCommentDraft[s.id] || ""}
               commentPosting={sportsCommentPosting === s.id}
+              currentReply={sportsReplyTo[s.id] ?? null}
               onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === s.id ? null : s.id)}
               onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [s.id]: v }))}
               onSubmitComment={() => submitSportsComment(s.id)}
+              onToggleCommentLike={toggleSportsCommentLike}
+              onStartReply={(commentId, name) => startSportsReply(s.id, commentId, name)}
+              onCancelReply={() => cancelSportsReply(s.id)}
               inputRef={(el) => { sportsCommentInputRefs.current[s.id] = el; }}
             />
           ))}
@@ -1235,7 +1321,7 @@ function CommentRow({
   onLike,
   onReply,
 }: {
-  comment: Comment;
+  comment: CommentLikeShape;
   liked: boolean;
   likeCount: number;
   onLike: () => void;
@@ -1278,14 +1364,18 @@ function SportsCard({
   onToggleReactionPicker,
   onPickReaction,
   scopeRef,
-  registerVideoRef,
   comments,
+  commentLikes,
   commentsOpen,
   commentDraft,
   commentPosting,
+  currentReply,
   onToggleComments,
   onDraftChange,
   onSubmitComment,
+  onToggleCommentLike,
+  onStartReply,
+  onCancelReply,
   inputRef,
 }: {
   update: SportsUpdate;
@@ -1296,19 +1386,25 @@ function SportsCard({
   onToggleReactionPicker: () => void;
   onPickReaction: (type: ReactionType) => void;
   scopeRef: (el: HTMLDivElement | null) => void;
-  registerVideoRef: (el: HTMLVideoElement | null) => void;
   comments: SportsComment[];
+  commentLikes: Record<string, { count: number; mine: boolean }>;
   commentsOpen: boolean;
   commentDraft: string;
   commentPosting: boolean;
+  currentReply: { commentId: string; name: string } | null;
   onToggleComments: () => void;
   onDraftChange: (v: string) => void;
   onSubmitComment: () => void;
+  onToggleCommentLike: (commentId: string) => void;
+  onStartReply: (commentId: string, name: string) => void;
+  onCancelReply: () => void;
   inputRef: (el: HTMLInputElement | null) => void;
 }) {
   const myReaction = reactions.find((r) => r.user_id === userId)?.type ?? null;
   const activeReactionInfo = REACTIONS.find((r) => r.type === myReaction);
   const summaryText = reactionSummaryText(reactions, userId);
+  const topLevel = comments.filter((c) => !c.parent_id);
+  const repliesOf = (id: string) => comments.filter((c) => c.parent_id === id);
 
   return (
     <div className="relative border-b border-hub-border bg-hub-card px-4 py-3">
@@ -1393,26 +1489,47 @@ function SportsCard({
       {commentsOpen && (
         <div className="mt-3 border-t border-hub-border pt-3">
           <div className="flex flex-col gap-3 max-h-72 overflow-y-auto">
-            {comments.length === 0 && <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>}
-            {comments.map((c) => (
-              <div key={c.id} className="flex items-start gap-2">
-                <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
-                  {c.first_name?.charAt(0).toUpperCase() ?? "U"}
-                </div>
-                <div className="flex-1 rounded-lg bg-hub-card2 px-2.5 py-1.5">
-                  <p className="text-[11px] font-medium text-white">{c.first_name}</p>
-                  <p className="text-xs text-white/90 whitespace-pre-wrap">{linkifyContent(c.content)}</p>
-                </div>
+            {topLevel.length === 0 && <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>}
+            {topLevel.map((c) => (
+              <div key={c.id}>
+                <CommentRow
+                  comment={c}
+                  liked={!!commentLikes[c.id]?.mine}
+                  likeCount={commentLikes[c.id]?.count ?? 0}
+                  onLike={() => onToggleCommentLike(c.id)}
+                  onReply={() => onStartReply(c.id, c.first_name || "them")}
+                />
+                {repliesOf(c.id).length > 0 && (
+                  <div className="ml-8 mt-2 flex flex-col gap-2">
+                    {repliesOf(c.id).map((r) => (
+                      <CommentRow
+                        key={r.id}
+                        comment={r}
+                        liked={!!commentLikes[r.id]?.mine}
+                        likeCount={commentLikes[r.id]?.count ?? 0}
+                        onLike={() => onToggleCommentLike(r.id)}
+                        onReply={() => onStartReply(c.id, c.first_name || "them")}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
+
+          {currentReply && (
+            <div className="mt-2 flex items-center justify-between rounded-md bg-hub-card2 px-2.5 py-1 text-[11px] text-hub-textDim">
+              <span>Replying to {currentReply.name}</span>
+              <button onClick={onCancelReply} className="text-hub-accentLight">Cancel</button>
+            </div>
+          )}
           <div className="mt-2 flex items-center gap-2">
             <input
               ref={inputRef}
               value={commentDraft}
               onChange={(e) => onDraftChange(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") onSubmitComment(); }}
-              placeholder="Write a comment..."
+              placeholder={currentReply ? `Reply to ${currentReply.name}...` : "Write a comment..."}
               className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
             />
             <button
