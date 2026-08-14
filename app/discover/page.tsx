@@ -172,18 +172,21 @@ export default function DiscoverPage() {
   const [sportsUploadError, setSportsUploadError] = useState<string | null>(null);
   const sportsImageInputRef = useRef<HTMLInputElement>(null);
   const sportsCategoryScopeRef = useRef<HTMLDivElement | null>(null);
-  const [sportsLikes, setSportsLikes] = useState<Record<string, { count: number; mine: boolean }>>({});
+
+  const [sportsReactionsByUpdate, setSportsReactionsByUpdate] = useState<Record<string, ReactionRecord[]>>({});
+  const [sportsReactionPickerFor, setSportsReactionPickerFor] = useState<string | null>(null);
+  const [sportsReactingId, setSportsReactingId] = useState<string | null>(null);
+  const sportsReactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   const [sportsCommentsByUpdate, setSportsCommentsByUpdate] = useState<Record<string, SportsComment[]>>({});
   const [sportsCommentOpenFor, setSportsCommentOpenFor] = useState<string | null>(null);
   const [sportsCommentDraft, setSportsCommentDraft] = useState<Record<string, string>>({});
   const [sportsCommentPosting, setSportsCommentPosting] = useState<string | null>(null);
   const sportsCommentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  // Click-outside scopes for reaction popup + post menu
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Shared IntersectionObserver — auto-pauses any video that scrolls out of view
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
@@ -205,7 +208,6 @@ export default function DiscoverPage() {
     if (el) videoObserverRef.current?.observe(el);
   }
 
-  // Close reaction popup / post menu / sports category suggestions when tapping outside them
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
       if (reactionPickerFor) {
@@ -216,6 +218,10 @@ export default function DiscoverPage() {
         const scope = menuScopeRefs.current[menuOpenFor];
         if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
       }
+      if (sportsReactionPickerFor) {
+        const scope = sportsReactionScopeRefs.current[sportsReactionPickerFor];
+        if (scope && !scope.contains(e.target as Node)) setSportsReactionPickerFor(null);
+      }
       if (sportsCategoryFocused) {
         const scope = sportsCategoryScopeRef.current;
         if (scope && !scope.contains(e.target as Node)) setSportsCategoryFocused(false);
@@ -223,7 +229,7 @@ export default function DiscoverPage() {
     }
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
-  }, [reactionPickerFor, menuOpenFor, sportsCategoryFocused]);
+  }, [reactionPickerFor, menuOpenFor, sportsReactionPickerFor, sportsCategoryFocused]);
 
   useEffect(() => {
     async function init() {
@@ -245,7 +251,6 @@ export default function DiscoverPage() {
     init();
   }, [router]);
 
-  // Lazy-load Sports updates the first time the Sports tab is opened
   useEffect(() => {
     if (activeTab === "Sports" && !sportsLoaded) {
       loadSportsUpdates();
@@ -599,58 +604,68 @@ export default function DiscoverPage() {
 
     const ids = mapped.map((s) => s.id);
     if (ids.length > 0) {
-      await Promise.all([loadSportsLikes(ids), loadSportsCommentsFor(ids)]);
+      await Promise.all([loadSportsReactions(ids), loadSportsCommentsFor(ids)]);
     }
   }
 
-  async function loadSportsLikes(updateIds: string[]) {
+  async function loadSportsReactions(updateIds: string[]) {
     const { data, error } = await supabase
-      .from("sports_update_likes")
-      .select("sports_update_id, user_id")
+      .from("sports_update_reactions")
+      .select("sports_update_id, user_id, type, profiles(first_name)")
       .in("sports_update_id", updateIds);
     if (error) {
       console.error(error);
       return;
     }
-    setSportsLikes((prev) => {
-      const next = { ...prev };
-      updateIds.forEach((id) => {
-        next[id] = { count: 0, mine: false };
-      });
-      (data ?? []).forEach((row: any) => {
-        if (!next[row.sports_update_id]) next[row.sports_update_id] = { count: 0, mine: false };
-        next[row.sports_update_id].count += 1;
-        if (row.user_id === userId) next[row.sports_update_id].mine = true;
-      });
-      return next;
+    const grouped: Record<string, ReactionRecord[]> = {};
+    (data ?? []).forEach((r: any) => {
+      if (!grouped[r.sports_update_id]) grouped[r.sports_update_id] = [];
+      grouped[r.sports_update_id].push({ type: r.type, user_id: r.user_id, first_name: r.profiles?.first_name ?? "Student" });
     });
+    setSportsReactionsByUpdate(grouped);
   }
 
-  async function toggleSportsLike(updateId: string) {
-    if (!userId) return;
-    const current = sportsLikes[updateId] || { count: 0, mine: false };
+  async function refreshSportsReactionsForUpdate(updateId: string) {
+    const { data, error } = await supabase
+      .from("sports_update_reactions")
+      .select("sports_update_id, user_id, type, profiles(first_name)")
+      .eq("sports_update_id", updateId);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setSportsReactionsByUpdate((prev) => ({
+      ...prev,
+      [updateId]: (data ?? []).map((r: any) => ({ type: r.type, user_id: r.user_id, first_name: r.profiles?.first_name ?? "Student" })),
+    }));
+  }
 
-    if (current.mine) {
-      setSportsLikes((prev) => ({ ...prev, [updateId]: { count: Math.max(0, current.count - 1), mine: false } }));
+  async function pickSportsReaction(updateId: string, type: ReactionType) {
+    if (!userId) return;
+    setSportsReactingId(updateId);
+    const existing = (sportsReactionsByUpdate[updateId] || []).find((r) => r.user_id === userId);
+
+    if (existing && existing.type === type) {
       const { error } = await supabase
-        .from("sports_update_likes")
+        .from("sports_update_reactions")
         .delete()
         .eq("sports_update_id", updateId)
         .eq("user_id", userId);
-      if (error) {
-        setSportsLikes((prev) => ({ ...prev, [updateId]: current }));
-        alert("Unlike failed: " + error.message);
-      }
+      if (error) alert("Reaction failed: " + error.message);
     } else {
-      setSportsLikes((prev) => ({ ...prev, [updateId]: { count: current.count + 1, mine: true } }));
       const { error } = await supabase
-        .from("sports_update_likes")
-        .insert({ sports_update_id: updateId, user_id: userId });
-      if (error) {
-        setSportsLikes((prev) => ({ ...prev, [updateId]: current }));
-        alert("Like failed: " + error.message);
-      }
+        .from("sports_update_reactions")
+        .upsert({ sports_update_id: updateId, user_id: userId, type }, { onConflict: "sports_update_id,user_id" });
+      if (error) alert("Reaction failed: " + error.message);
     }
+
+    await refreshSportsReactionsForUpdate(updateId);
+    setSportsReactingId(null);
+    setSportsReactionPickerFor(null);
+  }
+
+  function toggleSportsReactionButton(updateId: string) {
+    setSportsReactionPickerFor((prev) => (prev === updateId ? null : updateId));
   }
 
   async function loadSportsCommentsFor(updateIds: string[]) {
@@ -764,6 +779,9 @@ export default function DiscoverPage() {
 
   const visiblePosts = activeTab === "For You" ? posts : [];
   const trendingSportsUpdate = sportsUpdates.find((s) => s.image_url) ?? sportsUpdates[0] ?? null;
+  const recentSportsUpdates = trendingSportsUpdate
+    ? sportsUpdates.filter((s) => s.id !== trendingSportsUpdate.id)
+    : sportsUpdates;
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -840,126 +858,134 @@ export default function DiscoverPage() {
       )}
 
       {activeTab === "Sports" && (
-        <div className="px-5">
-          {/* Composer */}
-          <div className="mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
-            <input
-              value={sportsTitle}
-              onChange={(e) => setSportsTitle(e.target.value)}
-              placeholder="Update title (e.g. UniLafia FC wins inter-faculty match)"
-              className="w-full bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-            />
-            <textarea
-              value={sportsDescription}
-              onChange={(e) => setSportsDescription(e.target.value)}
-              placeholder="Add more details (optional)"
-              rows={2}
-              className="mt-2 w-full resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-            />
-
-            <div ref={sportsCategoryScopeRef} className="relative mt-2">
+        <>
+          <div className="px-5">
+            {/* Composer */}
+            <div className="mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
               <input
-                value={sportsCategory}
-                onChange={(e) => setSportsCategory(e.target.value)}
-                onFocus={() => setSportsCategoryFocused(true)}
-                placeholder="Category (e.g. Football, Basketball...)"
-                className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-2 text-xs text-white placeholder:text-hub-textDim outline-none"
+                value={sportsTitle}
+                onChange={(e) => setSportsTitle(e.target.value)}
+                placeholder="Update title (e.g. UniLafia FC wins inter-faculty match)"
+                className="w-full bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
               />
-              {sportsCategoryFocused && filteredCategorySuggestions().length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-                  {filteredCategorySuggestions().map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => {
-                        setSportsCategory(c);
-                        setSportsCategoryFocused(false);
-                      }}
-                      className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
-                    >
-                      {c}
-                    </button>
-                  ))}
+              <textarea
+                value={sportsDescription}
+                onChange={(e) => setSportsDescription(e.target.value)}
+                placeholder="Add more details (optional)"
+                rows={2}
+                className="mt-2 w-full resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
+              />
+
+              <div ref={sportsCategoryScopeRef} className="relative mt-2">
+                <input
+                  value={sportsCategory}
+                  onChange={(e) => setSportsCategory(e.target.value)}
+                  onFocus={() => setSportsCategoryFocused(true)}
+                  placeholder="Category (e.g. Football, Basketball...)"
+                  className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-2 text-xs text-white placeholder:text-hub-textDim outline-none"
+                />
+                {sportsCategoryFocused && filteredCategorySuggestions().length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                    {filteredCategorySuggestions().map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => {
+                          setSportsCategory(c);
+                          setSportsCategoryFocused(false);
+                        }}
+                        className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {sportsImageFile && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
+                  <PhotoIcon />
+                  <span>{sportsImageFile.name}</span>
+                  <button onClick={() => setSportsImageFile(null)} className="text-red-400 shrink-0">Remove</button>
                 </div>
               )}
-            </div>
+              {sportsUploadError && <p className="mt-2 text-xs text-red-400">{sportsUploadError}</p>}
 
-            {sportsImageFile && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-hub-textDim">
-                <PhotoIcon />
-                <span>{sportsImageFile.name}</span>
-                <button onClick={() => setSportsImageFile(null)} className="text-red-400 shrink-0">Remove</button>
+              <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+                <button type="button" onClick={() => sportsImageInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
+                  <PhotoIcon /><span>Photo</span>
+                </button>
+                <input ref={sportsImageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setSportsImageFile(e.target.files[0]); }} />
+                <button
+                  onClick={handleSportsPost}
+                  disabled={sportsPosting || !sportsTitle.trim() || !sportsCategory.trim()}
+                  className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {sportsPosting ? "Posting..." : "Post"}
+                </button>
               </div>
-            )}
-            {sportsUploadError && <p className="mt-2 text-xs text-red-400">{sportsUploadError}</p>}
-
-            <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-              <button type="button" onClick={() => sportsImageInputRef.current?.click()} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim">
-                <PhotoIcon /><span>Photo</span>
-              </button>
-              <input ref={sportsImageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) setSportsImageFile(e.target.files[0]); }} />
-              <button
-                onClick={handleSportsPost}
-                disabled={sportsPosting || !sportsTitle.trim() || !sportsCategory.trim()}
-                className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-              >
-                {sportsPosting ? "Posting..." : "Post"}
-              </button>
             </div>
+
+            {trendingSportsUpdate && (
+              <h2 className="mt-5 text-sm font-medium text-white">Trending Sports</h2>
+            )}
           </div>
 
-          {/* Trending Sports */}
+          {/* Trending Sports — lapped, edge-to-edge, same treatment as a Discover post */}
           {trendingSportsUpdate && (
-            <div className="mt-5">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-white">Trending Sports</h2>
-              </div>
-              <div className="mt-2">
-                <SportsCard
-                  update={trendingSportsUpdate}
-                  liked={!!sportsLikes[trendingSportsUpdate.id]?.mine}
-                  likeCount={sportsLikes[trendingSportsUpdate.id]?.count ?? 0}
-                  comments={sportsCommentsByUpdate[trendingSportsUpdate.id] || []}
-                  commentsOpen={sportsCommentOpenFor === trendingSportsUpdate.id}
-                  commentDraft={sportsCommentDraft[trendingSportsUpdate.id] || ""}
-                  commentPosting={sportsCommentPosting === trendingSportsUpdate.id}
-                  onLike={() => toggleSportsLike(trendingSportsUpdate.id)}
-                  onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === trendingSportsUpdate.id ? null : trendingSportsUpdate.id)}
-                  onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [trendingSportsUpdate.id]: v }))}
-                  onSubmitComment={() => submitSportsComment(trendingSportsUpdate.id)}
-                  inputRef={(el) => { sportsCommentInputRefs.current[trendingSportsUpdate.id] = el; }}
-                />
-              </div>
-            </div>
+            <SportsCard
+              update={trendingSportsUpdate}
+              userId={userId}
+              reactions={sportsReactionsByUpdate[trendingSportsUpdate.id] || []}
+              reactionPickerOpen={sportsReactionPickerFor === trendingSportsUpdate.id}
+              reacting={sportsReactingId === trendingSportsUpdate.id}
+              onToggleReactionPicker={() => toggleSportsReactionButton(trendingSportsUpdate.id)}
+              onPickReaction={(type) => pickSportsReaction(trendingSportsUpdate.id, type)}
+              scopeRef={(el) => { sportsReactionScopeRefs.current[trendingSportsUpdate.id] = el; }}
+              registerVideoRef={registerVideoRef}
+              comments={sportsCommentsByUpdate[trendingSportsUpdate.id] || []}
+              commentsOpen={sportsCommentOpenFor === trendingSportsUpdate.id}
+              commentDraft={sportsCommentDraft[trendingSportsUpdate.id] || ""}
+              commentPosting={sportsCommentPosting === trendingSportsUpdate.id}
+              onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === trendingSportsUpdate.id ? null : trendingSportsUpdate.id)}
+              onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [trendingSportsUpdate.id]: v }))}
+              onSubmitComment={() => submitSportsComment(trendingSportsUpdate.id)}
+              inputRef={(el) => { sportsCommentInputRefs.current[trendingSportsUpdate.id] = el; }}
+            />
           )}
 
-          {/* Recent Updates */}
-          <div className="mt-5">
-            <h2 className="text-sm font-medium text-white">Recent Updates</h2>
+          <div className="px-5">
+            <h2 className="mt-5 text-sm font-medium text-white">Recent Updates</h2>
             {sportsLoading && <p className="mt-2 text-xs text-hub-textDim">Loading...</p>}
             {!sportsLoading && sportsUpdates.length === 0 && (
               <p className="mt-2 text-xs text-hub-textDim">No sports updates yet — be the first to share one!</p>
             )}
-            <div className="mt-2 flex flex-col gap-4">
-              {sportsUpdates.map((s) => (
-                <SportsCard
-                  key={s.id}
-                  update={s}
-                  liked={!!sportsLikes[s.id]?.mine}
-                  likeCount={sportsLikes[s.id]?.count ?? 0}
-                  comments={sportsCommentsByUpdate[s.id] || []}
-                  commentsOpen={sportsCommentOpenFor === s.id}
-                  commentDraft={sportsCommentDraft[s.id] || ""}
-                  commentPosting={sportsCommentPosting === s.id}
-                  onLike={() => toggleSportsLike(s.id)}
-                  onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === s.id ? null : s.id)}
-                  onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [s.id]: v }))}
-                  onSubmitComment={() => submitSportsComment(s.id)}
-                  inputRef={(el) => { sportsCommentInputRefs.current[s.id] = el; }}
-                />
-              ))}
-            </div>
           </div>
-        </div>
+
+          {/* Recent Updates — lapped list, no gaps, matches Discover feed */}
+          {recentSportsUpdates.map((s) => (
+            <SportsCard
+              key={s.id}
+              update={s}
+              userId={userId}
+              reactions={sportsReactionsByUpdate[s.id] || []}
+              reactionPickerOpen={sportsReactionPickerFor === s.id}
+              reacting={sportsReactingId === s.id}
+              onToggleReactionPicker={() => toggleSportsReactionButton(s.id)}
+              onPickReaction={(type) => pickSportsReaction(s.id, type)}
+              scopeRef={(el) => { sportsReactionScopeRefs.current[s.id] = el; }}
+              registerVideoRef={registerVideoRef}
+              comments={sportsCommentsByUpdate[s.id] || []}
+              commentsOpen={sportsCommentOpenFor === s.id}
+              commentDraft={sportsCommentDraft[s.id] || ""}
+              commentPosting={sportsCommentPosting === s.id}
+              onToggleComments={() => setSportsCommentOpenFor(sportsCommentOpenFor === s.id ? null : s.id)}
+              onDraftChange={(v) => setSportsCommentDraft((prev) => ({ ...prev, [s.id]: v }))}
+              onSubmitComment={() => submitSportsComment(s.id)}
+              inputRef={(el) => { sportsCommentInputRefs.current[s.id] = el; }}
+            />
+          ))}
+        </>
       )}
 
       <div className="mt-4">
@@ -1245,105 +1271,160 @@ function CommentRow({
 
 function SportsCard({
   update,
-  liked,
-  likeCount,
+  userId,
+  reactions,
+  reactionPickerOpen,
+  reacting,
+  onToggleReactionPicker,
+  onPickReaction,
+  scopeRef,
+  registerVideoRef,
   comments,
   commentsOpen,
   commentDraft,
   commentPosting,
-  onLike,
   onToggleComments,
   onDraftChange,
   onSubmitComment,
   inputRef,
 }: {
   update: SportsUpdate;
-  liked: boolean;
-  likeCount: number;
+  userId: string | null;
+  reactions: ReactionRecord[];
+  reactionPickerOpen: boolean;
+  reacting: boolean;
+  onToggleReactionPicker: () => void;
+  onPickReaction: (type: ReactionType) => void;
+  scopeRef: (el: HTMLDivElement | null) => void;
+  registerVideoRef: (el: HTMLVideoElement | null) => void;
   comments: SportsComment[];
   commentsOpen: boolean;
   commentDraft: string;
   commentPosting: boolean;
-  onLike: () => void;
   onToggleComments: () => void;
   onDraftChange: (v: string) => void;
   onSubmitComment: () => void;
   inputRef: (el: HTMLInputElement | null) => void;
 }) {
+  const myReaction = reactions.find((r) => r.user_id === userId)?.type ?? null;
+  const activeReactionInfo = REACTIONS.find((r) => r.type === myReaction);
+  const summaryText = reactionSummaryText(reactions, userId);
+
   return (
-    <div className="overflow-hidden rounded-xl border border-hub-border bg-hub-card">
-      {update.image_url ? (
-        <img src={update.image_url} alt={update.title} className="block h-48 w-full object-cover" />
-      ) : (
-        <div className="h-32 w-full bg-hub-card2" />
+    <div className="relative border-b border-hub-border bg-hub-card px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+          {update.first_name?.charAt(0).toUpperCase() ?? "U"}
+        </div>
+        <div>
+          <p className="text-sm font-medium text-white">{update.first_name}</p>
+          <p className="text-xs text-hub-textDim">{timeAgo(update.created_at)} · {update.category}</p>
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm font-semibold text-white">{update.title}</p>
+      {update.description && (
+        <p className="mt-1 text-sm text-white/90 whitespace-pre-wrap">{update.description}</p>
       )}
 
-      <div className="p-3">
-        <span className="inline-block rounded-md bg-hub-accentLight px-2 py-0.5 text-[10px] font-medium text-white">
-          {update.category}
-        </span>
-        <p className="mt-1.5 text-sm font-semibold text-white">{update.title}</p>
-        {update.description && (
-          <p className="mt-1 text-xs text-white/80 whitespace-pre-wrap">{update.description}</p>
-        )}
-
-        <div className="mt-3 flex items-center gap-2">
-          <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
-            {update.first_name?.charAt(0).toUpperCase() ?? "U"}
-          </div>
-          <p className="text-xs text-hub-textDim">{update.first_name} · {timeAgo(update.created_at)}</p>
+      {update.image_url && (
+        <div className="-mx-4 mt-3 overflow-hidden">
+          <img src={update.image_url} alt={update.title} loading="lazy" className="block w-full object-cover" style={{ borderRadius: 0 }} />
         </div>
+      )}
 
-        <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-          <div className="flex items-center gap-5">
-            <button onClick={onLike} className={`flex items-center gap-1.5 text-xs ${liked ? "text-hub-accentLight" : "text-hub-textDim"}`}>
-              <ThumbsUpIcon className={liked ? "text-hub-accentLight" : "text-hub-textDim"} filled={liked} />
-              {likeCount > 0 && <span>{likeCount}</span>}
-            </button>
-            <button onClick={onToggleComments} className="flex items-center gap-1.5 text-xs text-hub-textDim">
-              <CommentIcon />
-              {comments.length > 0 && <span>{comments.length}</span>}
-            </button>
-          </div>
-          <BookmarkIcon filled={false} />
-        </div>
+      {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
-        {commentsOpen && (
-          <div className="mt-3 border-t border-hub-border pt-3">
-            <div className="flex flex-col gap-3 max-h-72 overflow-y-auto">
-              {comments.length === 0 && <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>}
-              {comments.map((c) => (
-                <div key={c.id} className="flex items-start gap-2">
-                  <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
-                    {c.first_name?.charAt(0).toUpperCase() ?? "U"}
-                  </div>
-                  <div className="flex-1 rounded-lg bg-hub-card2 px-2.5 py-1.5">
-                    <p className="text-[11px] font-medium text-white">{c.first_name}</p>
-                    <p className="text-xs text-white/90 whitespace-pre-wrap">{linkifyContent(c.content)}</p>
-                  </div>
-                </div>
+      <div ref={scopeRef} className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
+        {reactionPickerOpen && (
+          <div className="absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 rounded-2xl border border-hub-border bg-hub-card2 px-4 py-3 shadow-xl">
+            <div className="flex items-start gap-4">
+              {REACTION_TOP.map((r) => (
+                <button
+                  key={r.type}
+                  onClick={() => onPickReaction(r.type)}
+                  disabled={reacting}
+                  className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}
+                >
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                    {r.type === "like" ? <ThumbsUpIcon className="text-white" filled /> : <span className="text-lg leading-none">{r.emoji}</span>}
+                  </span>
+                  <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                </button>
               ))}
             </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                ref={inputRef}
-                value={commentDraft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") onSubmitComment(); }}
-                placeholder="Write a comment..."
-                className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
-              />
-              <button
-                onClick={onSubmitComment}
-                disabled={commentPosting || !commentDraft.trim()}
-                className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40"
-              >
-                {commentPosting ? "..." : "Send"}
-              </button>
+            <div className="mt-3 flex items-start gap-4">
+              {REACTION_BOTTOM.map((r) => (
+                <button
+                  key={r.type}
+                  onClick={() => onPickReaction(r.type)}
+                  disabled={reacting}
+                  className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}
+                >
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                    <span className="text-lg leading-none">{r.emoji}</span>
+                  </span>
+                  <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
+
+        <div className="flex items-center gap-6">
+          <button
+            onClick={onToggleReactionPicker}
+            className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? "text-hub-accentLight" : "text-hub-textDim"}`}
+          >
+            {activeReactionInfo ? (
+              activeReactionInfo.type === "like" ? <ThumbsUpIcon className="text-hub-accentLight" filled /> : <span className="text-base leading-none">{activeReactionInfo.emoji}</span>
+            ) : (
+              <ThumbsUpIcon className="text-hub-textDim" />
+            )}
+            {reactions.length > 0 && <span>{reactions.length}</span>}
+          </button>
+          <button onClick={onToggleComments} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+            <CommentIcon />
+            {comments.length > 0 && <span>{comments.length}</span>}
+          </button>
+        </div>
       </div>
+
+      {commentsOpen && (
+        <div className="mt-3 border-t border-hub-border pt-3">
+          <div className="flex flex-col gap-3 max-h-72 overflow-y-auto">
+            {comments.length === 0 && <p className="text-xs text-hub-textDim">No comments yet — be the first.</p>}
+            {comments.map((c) => (
+              <div key={c.id} className="flex items-start gap-2">
+                <div className="h-6 w-6 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-[10px] font-medium text-white">
+                  {c.first_name?.charAt(0).toUpperCase() ?? "U"}
+                </div>
+                <div className="flex-1 rounded-lg bg-hub-card2 px-2.5 py-1.5">
+                  <p className="text-[11px] font-medium text-white">{c.first_name}</p>
+                  <p className="text-xs text-white/90 whitespace-pre-wrap">{linkifyContent(c.content)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              ref={inputRef}
+              value={commentDraft}
+              onChange={(e) => onDraftChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onSubmitComment(); }}
+              placeholder="Write a comment..."
+              className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+            />
+            <button
+              onClick={onSubmitComment}
+              disabled={commentPosting || !commentDraft.trim()}
+              className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40"
+            >
+              {commentPosting ? "..." : "Send"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
