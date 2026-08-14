@@ -191,9 +191,18 @@ function MediaLightbox({
         {items.map((item, i) => (
           <div key={i} className="flex h-full w-full shrink-0 snap-center items-center justify-center">
             {item.type === "image" ? (
-              <img src={item.url} alt={`Media ${i + 1}`} className="max-h-full max-w-full object-contain" />
+              <img
+                src={item.url}
+                alt={`Media ${i + 1}`}
+                style={{ maxHeight: "100%", maxWidth: "100%", width: "auto", height: "auto", objectFit: "contain" }}
+              />
             ) : (
-              <video src={item.url} controls autoPlay className="max-h-full max-w-full object-contain" />
+              <video
+                src={item.url}
+                controls
+                autoPlay
+                style={{ maxHeight: "100%", maxWidth: "100%", width: "auto", height: "auto", objectFit: "contain" }}
+              />
             )}
           </div>
         ))}
@@ -226,33 +235,52 @@ export function MediaCarousel({
   return (
     <>
       {items.length === 1 ? (
-        <div className="-mx-4 mt-3 overflow-hidden bg-black">
+        <div className="-mx-4 mt-3 overflow-hidden bg-black" style={{ maxHeight: 480 }}>
           {items[0].type === "image" ? (
             <img
               src={items[0].url}
               alt="Post media"
               loading="lazy"
               onClick={() => setLightboxIndex(0)}
-              className="block max-h-[480px] w-full object-contain cursor-zoom-in"
+              className="block cursor-zoom-in"
+              style={{ width: "100%", height: "auto", maxHeight: 480, objectFit: "contain", display: "block", margin: "0 auto" }}
             />
           ) : (
-            <video ref={registerVideoRef} src={items[0].url} controls preload="metadata" className="block w-full" />
+            <video
+              ref={registerVideoRef}
+              src={items[0].url}
+              controls
+              preload="metadata"
+              className="block"
+              style={{ width: "100%", height: "auto", maxHeight: 480, objectFit: "contain", display: "block", margin: "0 auto" }}
+            />
           )}
         </div>
       ) : (
         <div className="-mx-4 mt-3 flex gap-1 overflow-x-auto snap-x snap-mandatory scrollbar-hide">
           {items.map((item, i) => (
-            <div key={i} className="relative shrink-0 w-[92%] snap-center overflow-hidden bg-black">
+            <div
+              key={i}
+              className="relative shrink-0 w-[92%] snap-center overflow-hidden bg-black"
+              style={{ height: 288 }}
+            >
               {item.type === "image" ? (
                 <img
                   src={item.url}
                   alt={`Post media ${i + 1}`}
                   loading="lazy"
                   onClick={() => setLightboxIndex(i)}
-                  className="block h-72 w-full object-contain cursor-zoom-in"
+                  className="cursor-zoom-in"
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
               ) : (
-                <video ref={registerVideoRef} src={item.url} controls preload="metadata" className="block h-72 w-full object-contain" />
+                <video
+                  ref={registerVideoRef}
+                  src={item.url}
+                  controls
+                  preload="metadata"
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                />
               )}
               <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
                 {i + 1}/{items.length}
@@ -495,7 +523,7 @@ export function TrophyIcon({ small }: { small?: boolean }) {
 export function TrashIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
