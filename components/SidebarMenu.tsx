@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -14,28 +13,34 @@ type MenuItem = {
   comingSoon?: boolean;
 };
 
-export default function SidebarMenu({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export default function SidebarMenu({
+  open,
+  onClose,
+  firstName,
+  department,
+}: {
+  open: boolean;
+  onClose: () => void;
+  firstName: string | null;
+  department: string | null;
+}) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  const [firstName, setFirstName] = useState<string | null>(null);
-  const [department, setDepartment] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    async function load() {
+    async function loadAvatar() {
       const { data } = await supabase.auth.getUser();
       if (!data.user) return;
       const { data: profile } = await supabase
         .from("profiles")
-        .select("first_name, department, avatar_url")
+        .select("avatar_url")
         .eq("id", data.user.id)
         .single();
-      setFirstName(profile?.first_name ?? null);
-      setDepartment(profile?.department ?? null);
       setAvatarUrl(profile?.avatar_url ?? null);
     }
-    if (isOpen) load();
-  }, [isOpen]);
+    if (open) loadAvatar();
+  }, [open]);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -65,10 +70,10 @@ export default function SidebarMenu({ isOpen, onClose }: { isOpen: boolean; onCl
 
   return (
     <>
-      {isOpen && <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose} />}
+      {open && <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose} />}
       <div
         className={`fixed left-0 top-0 z-50 h-full w-[82%] max-w-xs bg-hub-card transition-transform duration-300 ${
-          isOpen ? "translate-x-0" : "-translate-x-full"
+          open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="bg-gradient-to-br from-hub-accent to-hub-accentLight px-5 pb-5 pt-8">
