@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
+import { ThemeProvider } from "@/lib/theme/ThemeProvider";
 
 export const metadata: Metadata = {
   title: "Uni.hub — Your Campus. Connected.",
@@ -20,9 +21,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
       <body className="bg-hub-bg min-h-screen antialiased">
-        <div className="mx-auto max-w-md min-h-screen relative">{children}</div>
+        <ThemeProvider>
+          <div className="mx-auto max-w-md min-h-screen relative">{children}</div>
+        </ThemeProvider>
         <Script src="https://js.paystack.co/v1/inline.js" strategy="beforeInteractive" />
       </body>
     </html>
