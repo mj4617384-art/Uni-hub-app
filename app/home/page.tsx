@@ -61,6 +61,11 @@ export default function HomePage() {
   const [recentPosts, setRecentPosts] = useState<RecentPost[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const [eventsToday, setEventsToday] = useState<number>(0);
+  const [communitiesCount, setCommunitiesCount] = useState<number>(0);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [showBalance, setShowBalance] = useState(true);
+
   useEffect(() => {
     async function loadUser() {
       const { data } = await supabase.auth.getUser();
@@ -75,11 +80,41 @@ export default function HomePage() {
         .single();
       setFirstName(profile?.first_name ?? null);
       setDepartment(profile?.department ?? null);
-      await loadRecentPosts();
+      await Promise.all([
+        loadRecentPosts(),
+        loadStats(data.user.id),
+      ]);
       setLoading(false);
     }
     loadUser();
   }, [router]);
+
+  async function loadStats(userId: string) {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const [eventsRes, communitiesRes, walletRes] = await Promise.all([
+      supabase
+        .from("events")
+        .select("id", { count: "exact", head: true })
+        .gte("start_time", startOfDay.toISOString())
+        .lte("start_time", endOfDay.toISOString()),
+      supabase
+        .from("communities")
+        .select("id", { count: "exact", head: true }),
+      supabase
+        .from("wallets")
+        .select("balance")
+        .eq("user_id", userId)
+        .single(),
+    ]);
+
+    if (!eventsRes.error) setEventsToday(eventsRes.count ?? 0);
+    if (!communitiesRes.error) setCommunitiesCount(communitiesRes.count ?? 0);
+    if (!walletRes.error && walletRes.data) setWalletBalance(Number(walletRes.data.balance));
+  }
 
   async function loadRecentPosts() {
     const { data, error } = await supabase
@@ -163,6 +198,48 @@ export default function HomePage() {
           </p>
           <div className="mt-2 h-0.5 w-10 rounded-full bg-hub-accentLight" />
         </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="mx-5 mt-4 grid grid-cols-3 gap-3">
+        <button
+          onClick={() => router.push("/events")}
+          className="flex flex-col items-start gap-1 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+        >
+          <span className="text-hub-accentLight"><CalendarIcon /></span>
+          <span className="text-base font-semibold text-white">{eventsToday}</span>
+          <span className="text-[11px] text-hub-textDim">Events today</span>
+        </button>
+        <button
+          onClick={() => router.push("/communities")}
+          className="flex flex-col items-start gap-1 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+        >
+          <span className="text-hub-accentLight"><UsersIcon /></span>
+          <span className="text-base font-semibold text-white">{communitiesCount}</span>
+          <span className="text-[11px] text-hub-textDim">Communities</span>
+        </button>
+        <button
+          onClick={() => router.push("/wallet")}
+          className="flex flex-col items-start gap-1 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+        >
+          <div className="flex w-full items-center justify-between">
+            <span className="text-hub-accentLight"><WalletIcon /></span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowBalance((s) => !s);
+              }}
+              aria-label="Toggle balance visibility"
+              className="text-hub-textDim"
+            >
+              <EyeIcon show={showBalance} />
+            </button>
+          </div>
+          <span className="text-base font-semibold text-white">
+            {showBalance ? `₦${(walletBalance ?? 0).toLocaleString()}` : "₦••••••"}
+          </span>
+          <span className="text-[11px] text-hub-textDim">Wallet balance</span>
+        </button>
       </div>
 
       {/* Campus Services grid */}
@@ -307,6 +384,18 @@ function MenuIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
       <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
+function EyeIcon({ show }: { show: boolean }) {
+  return show ? (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s4-8 10-8 10 8 10 8-4 8-10 8-10-8-10-8z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  ) : (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M3 3l18 18M10.58 10.58a2 2 0 002.83 2.83M9.88 4.24A9.77 9.77 0 0112 4c5 0 9 4.5 10 8-.31.99-.84 2.02-1.56 3M6.6 6.6C4.3 8.05 2.6 10.2 2 12c1 3.5 5 8 10 8 1.35 0 2.63-.28 3.78-.78" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
