@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import BottomNav from "@/components/BottomNav";
+import SidebarMenu from "@/components/SidebarMenu";
 
 type Service = {
   label: string;
@@ -55,8 +56,10 @@ function timeAgo(dateStr: string) {
 export default function HomePage() {
   const router = useRouter();
   const [firstName, setFirstName] = useState<string | null>(null);
+  const [department, setDepartment] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [recentPosts, setRecentPosts] = useState<RecentPost[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     async function loadUser() {
@@ -67,10 +70,11 @@ export default function HomePage() {
       }
       const { data: profile } = await supabase
         .from("profiles")
-        .select("first_name")
+        .select("first_name, department")
         .eq("id", data.user.id)
         .single();
       setFirstName(profile?.first_name ?? null);
+      setDepartment(profile?.department ?? null);
       await loadRecentPosts();
       setLoading(false);
     }
@@ -111,9 +115,18 @@ export default function HomePage() {
     <main className="min-h-screen bg-hub-bg pb-28">
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 pt-5">
-        <h1 className="text-xl font-semibold">
-          Uni<span className="text-hub-accentLight">.hub</span>
-        </h1>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open menu"
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-hub-border bg-hub-card text-hub-textDim"
+          >
+            <MenuIcon />
+          </button>
+          <h1 className="text-xl font-semibold">
+            Uni<span className="text-hub-accentLight">.hub</span>
+          </h1>
+        </div>
         <div className="flex items-center gap-4 text-hub-textDim">
           <SearchIcon />
           <div className="relative">
@@ -126,6 +139,13 @@ export default function HomePage() {
           </button>
         </div>
       </div>
+
+      <SidebarMenu
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        firstName={firstName}
+        department={department}
+      />
 
       {/* Greeting card — solid navy on the left blending into the campus photo on the right */}
       <div
@@ -283,6 +303,13 @@ export default function HomePage() {
   );
 }
 
+function MenuIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
 function BriefcaseIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
