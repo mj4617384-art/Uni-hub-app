@@ -266,17 +266,35 @@ export default function ForYouPage() {
 
     const hashtags = extractHashtags(content);
 
-    const { error } = await supabase.from("discover_posts").insert({
-      user_id: userId,
-      content: content.trim() || null,
-      image_url: image_urls[0] ?? null,
-      video_url: video_urls[0] ?? null,
-      image_urls,
-      video_urls,
-      hashtags,
-    });
+    const { data: inserted, error } = await supabase
+      .from("discover_posts")
+      .insert({
+        user_id: userId,
+        content: content.trim() || null,
+        image_url: image_urls[0] ?? null,
+        video_url: video_urls[0] ?? null,
+        image_urls,
+        video_urls,
+        hashtags,
+      })
+      .select("id, category, visibility, created_at")
+      .single();
 
     if (error) { setUploadError("Post failed: " + error.message); setPosting(false); return; }
+
+    // Keep the unified feed index in sync so this post is discoverable
+    // through the same system Sports/News/etc. write into.
+    if (inserted) {
+      const { error: feedErr } = await supabase.from("discover_feed_items").insert({
+        source_type: "discover_post",
+        source_id: inserted.id,
+        user_id: userId,
+        category: inserted.category ?? "campus_life",
+        visibility: inserted.visibility ?? "public",
+        created_at: inserted.created_at,
+      });
+      if (feedErr) console.error("Feed index insert failed:", feedErr);
+    }
 
     setContent(""); setImageFiles([]); setVideoFiles([]);
     await loadPosts();
