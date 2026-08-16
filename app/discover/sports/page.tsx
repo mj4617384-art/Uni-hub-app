@@ -339,20 +339,38 @@ export default function SportsPage() {
       video_urls.push(urlData.publicUrl);
     }
 
-    const { error } = await supabase.from("sports_updates").insert({
-      user_id: userId,
-      title: title.trim(),
-      description: description.trim() || null,
-      category: category.trim() || "General",
-      image_url: image_urls[0] ?? null,
-      image_urls,
-      video_urls,
-    });
+    const { data: inserted, error } = await supabase
+      .from("sports_updates")
+      .insert({
+        user_id: userId,
+        title: title.trim(),
+        description: description.trim() || null,
+        category: category.trim() || "General",
+        image_url: image_urls[0] ?? null,
+        image_urls,
+        video_urls,
+      })
+      .select("id, created_at")
+      .single();
 
     if (error) {
       setUploadError("Post failed: " + error.message);
       setPosting(false);
       return;
+    }
+
+    // Keep the unified feed index in sync — this is what lets Sports posts
+    // surface into the merged For You feed later.
+    if (inserted) {
+      const { error: feedErr } = await supabase.from("discover_feed_items").insert({
+        source_type: "sports_update",
+        source_id: inserted.id,
+        user_id: userId,
+        category: "sports",
+        visibility: "public",
+        created_at: inserted.created_at,
+      });
+      if (feedErr) console.error("Feed index insert failed:", feedErr);
     }
 
     setTitle("");
