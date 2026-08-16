@@ -293,7 +293,7 @@ export default function HomePage() {
           <div className="mt-3 flex items-center gap-5 border-t border-hub-border pt-3">
             <button
               type="button"
-              onClick={() => router.push("/discover")}
+              onClick={() => router.push("/discover?compose=photo")}
               className="flex items-center gap-1.5 text-xs text-hub-textDim"
             >
               <PhotoIcon />
@@ -301,7 +301,7 @@ export default function HomePage() {
             </button>
             <button
               type="button"
-              onClick={() => router.push("/discover")}
+              onClick={() => router.push("/discover?compose=video")}
               className="flex items-center gap-1.5 text-xs text-hub-textDim"
             >
               <VideoIcon />
@@ -309,7 +309,7 @@ export default function HomePage() {
             </button>
             <button
               type="button"
-              onClick={() => router.push("/discover")}
+              onClick={() => router.push("/create-poll")}
               className="flex items-center gap-1.5 text-xs text-hub-textDim"
             >
               <PollIcon />
