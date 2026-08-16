@@ -10,8 +10,6 @@ import {
   ThumbsUpIcon,
   CommentIcon,
   BookmarkIcon,
-  PhotoIcon,
-  VideoIcon,
   linkifyContent,
   timeAgo,
 } from "@/lib/discover/shared";
@@ -19,11 +17,22 @@ import {
 type ProfileData = {
   first_name: string | null;
   last_name: string | null;
+  username: string | null;
   bio: string | null;
   avatar_url: string | null;
   cover_url: string | null;
   department: string | null;
   faculty: string | null;
+  level: string | null;
+  campus: string | null;
+  university: string | null;
+  graduation_year: string | null;
+  website_url: string | null;
+  instagram_handle: string | null;
+  linkedin_url: string | null;
+  twitter_handle: string | null;
+  interests: string[] | null;
+  show_university_info: boolean | null;
   created_at: string;
 };
 
@@ -62,9 +71,6 @@ export default function ProfilePage() {
   const [postsCount, setPostsCount] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [bioDraft, setBioDraft] = useState("");
-  const [savingProfile, setSavingProfile] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -87,12 +93,13 @@ export default function ProfilePage() {
 
       const { data: p } = await supabase
         .from("profiles")
-        .select("first_name, last_name, bio, avatar_url, cover_url, department, faculty, created_at")
+        .select(
+          "first_name, last_name, username, bio, avatar_url, cover_url, department, faculty, level, campus, university, graduation_year, website_url, instagram_handle, linkedin_url, twitter_handle, interests, show_university_info, created_at"
+        )
         .eq("id", data.user.id)
         .single();
 
       setProfile(p as ProfileData);
-      setBioDraft(p?.bio ?? "");
 
       const [discoverCount, sportsCount, bookmarkCount] = await Promise.all([
         supabase.from("discover_posts").select("id", { count: "exact", head: true }).eq("user_id", data.user.id),
@@ -270,19 +277,6 @@ export default function ProfilePage() {
     setProfile((prev) => (prev ? { ...prev, cover_url: urlData.publicUrl } : prev));
   }
 
-  async function saveBio() {
-    if (!userId) return;
-    setSavingProfile(true);
-    const { error } = await supabase.from("profiles").update({ bio: bioDraft.trim() || null }).eq("id", userId);
-    setSavingProfile(false);
-    if (error) {
-      alert("Save failed: " + error.message);
-      return;
-    }
-    setProfile((prev) => (prev ? { ...prev, bio: bioDraft.trim() || null } : prev));
-    setIsEditing(false);
-  }
-
   async function shareProfile() {
     const url = `${window.location.origin}/profile`;
     if (navigator.share) {
@@ -305,6 +299,8 @@ export default function ProfilePage() {
 
   const fullName = [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Student";
   const mediaPosts = (posts ?? []).filter((p) => p.image_urls.length > 0 || p.video_urls.length > 0);
+  const showUniInfo = profile.show_university_info !== false;
+  const hasSocialLinks = profile.website_url || profile.instagram_handle || profile.linkedin_url || profile.twitter_handle;
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -361,55 +357,74 @@ export default function ProfilePage() {
         </div>
 
         <h1 className="mt-3 text-lg font-semibold text-white">{fullName}</h1>
-        {(profile.department || profile.faculty) && (
-          <p className="text-sm text-hub-textDim">
-            {profile.department}
-            {profile.department && profile.faculty ? " · " : ""}
-            {profile.faculty}
+        {profile.username && <p className="text-sm text-hub-textDim">@{profile.username}</p>}
+
+        {showUniInfo && (profile.department || profile.faculty || profile.level || profile.campus) && (
+          <p className="mt-1 text-sm text-hub-textDim">
+            {[profile.department, profile.faculty, profile.level, profile.campus].filter(Boolean).join(" · ")}
           </p>
         )}
+
         <p className="mt-1 flex items-center gap-1 text-xs text-hub-textDim">
           <CalendarSmallIcon /> {joinedLabel(profile.created_at)}
+          {showUniInfo && profile.graduation_year ? ` · Class of ${profile.graduation_year}` : ""}
         </p>
 
-        {isEditing ? (
-          <div className="mt-3">
-            <textarea
-              value={bioDraft}
-              onChange={(e) => setBioDraft(e.target.value)}
-              placeholder="Write a short bio..."
-              rows={2}
-              className="w-full resize-none rounded-lg border border-hub-border bg-hub-card2 px-3 py-2 text-sm text-white placeholder:text-hub-textDim outline-none"
-            />
-            <div className="mt-2 flex gap-2">
-              <button onClick={saveBio} disabled={savingProfile} className="rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40">
-                {savingProfile ? "Saving..." : "Save"}
-              </button>
-              <button
-                onClick={() => {
-                  setBioDraft(profile.bio ?? "");
-                  setIsEditing(false);
-                }}
-                className="rounded-lg border border-hub-border px-4 py-1.5 text-xs font-medium text-hub-textDim"
-              >
-                Cancel
-              </button>
-            </div>
+        {profile.bio && <p className="mt-2 text-sm text-white/90 whitespace-pre-wrap">{profile.bio}</p>}
+
+        {profile.interests && profile.interests.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {profile.interests.map((tag) => (
+              <span key={tag} className="rounded-full border border-hub-accentLight/40 bg-hub-accentLight/10 px-2.5 py-1 text-[11px] text-hub-accentLight">
+                {tag}
+              </span>
+            ))}
           </div>
-        ) : (
-          profile.bio && <p className="mt-2 text-sm text-white/90 whitespace-pre-wrap">{profile.bio}</p>
         )}
 
-        {!isEditing && (
-          <div className="mt-4 flex gap-2">
-            <button onClick={() => setIsEditing(true)} className="flex-1 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
-              Edit Profile
-            </button>
-            <button onClick={shareProfile} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
-              <ShareIcon /> Share Profile
-            </button>
+        {hasSocialLinks && (
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {profile.website_url && (
+              <a href={profile.website_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-hub-accentLight">
+                <LinkIconSmall /> Website
+              </a>
+            )}
+            {profile.instagram_handle && (
+              <a
+                href={`https://instagram.com/${profile.instagram_handle.replace("@", "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-hub-accentLight"
+              >
+                <InstagramIconSmall /> {profile.instagram_handle}
+              </a>
+            )}
+            {profile.linkedin_url && (
+              <a href={profile.linkedin_url.startsWith("http") ? profile.linkedin_url : `https://${profile.linkedin_url}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-hub-accentLight">
+                <LinkedinIconSmall /> LinkedIn
+              </a>
+            )}
+            {profile.twitter_handle && (
+              <a
+                href={`https://x.com/${profile.twitter_handle.replace("@", "")}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-hub-accentLight"
+              >
+                <XIconSmall /> {profile.twitter_handle}
+              </a>
+            )}
           </div>
         )}
+
+        <div className="mt-4 flex gap-2">
+          <button onClick={() => router.push("/profile/edit")} className="flex-1 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
+            Edit Profile
+          </button>
+          <button onClick={shareProfile} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
+            <ShareIcon /> Share Profile
+          </button>
+        </div>
 
         {/* Stats */}
         <div className="mt-4 flex gap-6 border-t border-hub-border pt-3">
@@ -555,6 +570,38 @@ function CalendarSmallIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.8" />
       <path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function LinkIconSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M9 15l6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M11 6l1-1a4 4 0 015.7 5.7l-1 1M13 18l-1 1a4 4 0 01-5.7-5.7l1-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function InstagramIconSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="17.2" cy="6.8" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+function LinkedinIconSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7 10v7M7 7v.01M11 17v-4.5a2 2 0 014-.2M15 12.5V17" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function XIconSmall() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M4 4l16 16M20 4L4 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
