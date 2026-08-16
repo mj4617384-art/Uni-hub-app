@@ -63,6 +63,10 @@ function joinedLabel(dateStr: string) {
   return `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
 }
 
+function keyFor(source: "discover" | "sports", id: string) {
+  return `${source}-${id}`;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -82,6 +86,9 @@ export default function ProfilePage() {
   const [replies, setReplies] = useState<UnifiedReply[] | null>(null);
   const [saved, setSaved] = useState<UnifiedPost[] | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
+
+  const [reactionCounts, setReactionCounts] = useState<Record<string, number>>({});
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function init() {
@@ -122,6 +129,49 @@ export default function ProfilePage() {
     }
     init();
   }, [router]);
+
+  async function loadEngagementCounts(discoverIds: string[], sportsIds: string[]) {
+    const [drRes, dcRes, srRes, scRes] = await Promise.all([
+      discoverIds.length
+        ? supabase.from("discover_reactions").select("post_id").in("post_id", discoverIds)
+        : Promise.resolve({ data: [] as any[] }),
+      discoverIds.length
+        ? supabase.from("discover_comments").select("post_id").in("post_id", discoverIds)
+        : Promise.resolve({ data: [] as any[] }),
+      sportsIds.length
+        ? supabase.from("sports_update_reactions").select("sports_update_id").in("sports_update_id", sportsIds)
+        : Promise.resolve({ data: [] as any[] }),
+      sportsIds.length
+        ? supabase.from("sports_update_comments").select("sports_update_id").in("sports_update_id", sportsIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    setReactionCounts((prev) => {
+      const next = { ...prev };
+      (drRes.data ?? []).forEach((r: any) => {
+        const k = keyFor("discover", r.post_id);
+        next[k] = (next[k] ?? 0) + 1;
+      });
+      (srRes.data ?? []).forEach((r: any) => {
+        const k = keyFor("sports", r.sports_update_id);
+        next[k] = (next[k] ?? 0) + 1;
+      });
+      return next;
+    });
+
+    setCommentCounts((prev) => {
+      const next = { ...prev };
+      (dcRes.data ?? []).forEach((c: any) => {
+        const k = keyFor("discover", c.post_id);
+        next[k] = (next[k] ?? 0) + 1;
+      });
+      (scRes.data ?? []).forEach((c: any) => {
+        const k = keyFor("sports", c.sports_update_id);
+        next[k] = (next[k] ?? 0) + 1;
+      });
+      return next;
+    });
+  }
 
   async function loadPosts(uid: string) {
     setTabLoading(true);
@@ -166,6 +216,11 @@ export default function ProfilePage() {
     );
     setPosts(merged);
     setTabLoading(false);
+
+    await loadEngagementCounts(
+      discoverMapped.map((p) => p.id),
+      sportsMapped.map((p) => p.id)
+    );
   }
 
   async function loadReplies(uid: string) {
@@ -236,6 +291,11 @@ export default function ProfilePage() {
       }));
     setSaved(mapped);
     setTabLoading(false);
+
+    await loadEngagementCounts(
+      mapped.map((p) => p.id),
+      []
+    );
   }
 
   function handleTabClick(tab: Tab) {
@@ -376,8 +436,11 @@ export default function ProfilePage() {
         <h1 className="mt-3 text-lg font-semibold text-white">{fullName}</h1>
         {profile.username && <p className="text-sm text-hub-textDim">@{profile.username}</p>}
 
+        {showUniInfo && profile.university && (
+          <p className="mt-1 text-sm font-medium text-hub-accentLight">{profile.university}</p>
+        )}
         {showUniInfo && (profile.department || profile.faculty || profile.level || profile.campus) && (
-          <p className="mt-1 text-sm text-hub-textDim">
+          <p className="mt-0.5 text-sm text-hub-textDim">
             {[profile.department, profile.faculty, profile.level, profile.campus].filter(Boolean).join(" · ")}
           </p>
         )}
@@ -484,7 +547,13 @@ export default function ProfilePage() {
           <>
             {posts && posts.length === 0 && <p className="px-5 text-center text-sm text-hub-textDim">No posts yet.</p>}
             {(posts ?? []).map((p) => (
-              <PostRow key={`${p.source}-${p.id}`} post={p} onOpen={() => router.push(p.source === "sports" ? "/discover/sports" : "/discover")} />
+              <PostRow
+                key={`${p.source}-${p.id}`}
+                post={p}
+                reactionCount={reactionCounts[keyFor(p.source, p.id)] ?? 0}
+                commentCount={commentCounts[keyFor(p.source, p.id)] ?? 0}
+                onOpen={() => router.push(p.source === "sports" ? "/discover/sports" : "/discover")}
+              />
             ))}
           </>
         )}
@@ -521,7 +590,13 @@ export default function ProfilePage() {
           <>
             {saved && saved.length === 0 && <p className="px-5 text-center text-sm text-hub-textDim">Nothing saved yet.</p>}
             {(saved ?? []).map((p) => (
-              <PostRow key={`saved-${p.id}`} post={p} onOpen={() => router.push("/discover")} />
+              <PostRow
+                key={`saved-${p.id}`}
+                post={p}
+                reactionCount={reactionCounts[keyFor(p.source, p.id)] ?? 0}
+                commentCount={commentCounts[keyFor(p.source, p.id)] ?? 0}
+                onOpen={() => router.push("/discover")}
+              />
             ))}
           </>
         )}
@@ -532,7 +607,17 @@ export default function ProfilePage() {
   );
 }
 
-function PostRow({ post, onOpen }: { post: UnifiedPost; onOpen: () => void }) {
+function PostRow({
+  post,
+  reactionCount,
+  commentCount,
+  onOpen,
+}: {
+  post: UnifiedPost;
+  reactionCount: number;
+  commentCount: number;
+  onOpen: () => void;
+}) {
   return (
     <button onClick={onOpen} className="flex w-full flex-col border-b border-hub-border bg-hub-card px-5 py-3 text-left">
       <div className="flex items-center justify-between">
@@ -544,17 +629,34 @@ function PostRow({ post, onOpen }: { post: UnifiedPost; onOpen: () => void }) {
       {post.text && <p className="mt-1 text-sm text-white/90 line-clamp-3 whitespace-pre-wrap">{linkifyContent(post.text)}</p>}
       {post.description && <p className="mt-1 text-xs text-hub-textDim line-clamp-2">{post.description}</p>}
       {(post.image_urls[0] || post.video_urls[0]) && (
-        <div className="mt-2 h-40 w-full overflow-hidden rounded-lg bg-black">
+        <div className="mt-2 -mx-5 w-[calc(100%+2.5rem)] overflow-hidden bg-black">
           {post.image_urls[0] ? (
-            <img src={post.image_urls[0]} alt="" className="h-full w-full object-cover" />
+            <img
+              src={post.image_urls[0]}
+              alt=""
+              className="block w-full object-contain"
+              style={{ maxHeight: 420 }}
+            />
           ) : (
-            <video src={post.video_urls[0]} className="h-full w-full object-cover" />
+            <video
+              src={post.video_urls[0]}
+              controls
+              preload="metadata"
+              className="block w-full object-contain"
+              style={{ maxHeight: 420 }}
+            />
           )}
         </div>
       )}
       <div className="mt-2 flex items-center gap-5 text-hub-textDim">
-        <ThumbsUpIcon />
-        <CommentIcon />
+        <span className="flex items-center gap-1.5">
+          <ThumbsUpIcon />
+          {reactionCount > 0 && <span className="text-xs">{reactionCount}</span>}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <CommentIcon />
+          {commentCount > 0 && <span className="text-xs">{commentCount}</span>}
+        </span>
         <ShareIcon />
         <BookmarkIcon filled={false} />
       </div>
