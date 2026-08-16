@@ -74,10 +74,15 @@ export const REACTION_BOTTOM = REACTIONS.slice(3);
 
 export const DISCOVER_TABS = [
   { label: "For You", href: "/discover" },
-  { label: "Following", href: "/discover/following" },
-  { label: "Sports", href: "/discover/sports" },
+  { label: "Trending", href: "/discover/trending" },
   { label: "News", href: "/discover/news" },
+  { label: "Sports", href: "/discover/sports" },
   { label: "Clubs", href: "/discover/clubs" },
+  { label: "Events", href: "/discover/events" },
+  { label: "Marketplace", href: "/discover/marketplace" },
+  { label: "Study", href: "/discover/study" },
+  { label: "Campus Life", href: "/discover/campus-life" },
+  { label: "Following", href: "/discover/following" },
 ];
 
 export const URL_REGEX = /(https?:\/\/[^\s]+)/g;
