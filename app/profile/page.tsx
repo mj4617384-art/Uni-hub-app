@@ -68,7 +68,6 @@ export default function ProfilePage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [postsCount, setPostsCount] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
 
@@ -92,20 +91,13 @@ export default function ProfilePage() {
       }
       setUserId(data.user.id);
 
-      const { data: p, error: profileError } = await supabase
+      const { data: p } = await supabase
         .from("profiles")
         .select(
           "first_name, last_name, username, bio, avatar_url, cover_url, department, faculty, level, campus, university, graduation_year, website_url, instagram_handle, linkedin_url, twitter_handle, interests, show_university_info, created_at"
         )
         .eq("id", data.user.id)
         .single();
-
-      if (profileError) {
-        console.error(profileError);
-        setLoadError(profileError.message);
-        setLoading(false);
-        return;
-      }
 
       setProfile(p as ProfileData);
 
@@ -297,17 +289,6 @@ export default function ProfilePage() {
     }
   }
 
-  if (loadError) {
-    return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 bg-hub-bg px-6 text-center">
-        <p className="text-sm text-red-400">Couldn&apos;t load your profile: {loadError}</p>
-        <button onClick={() => window.location.reload()} className="rounded-lg bg-hub-accentLight px-4 py-2 text-xs font-medium text-white">
-          Retry
-        </button>
-      </div>
-    );
-  }
-
   if (loading || !profile) {
     return (
       <div className="flex h-screen items-center justify-center bg-hub-bg">
@@ -323,6 +304,7 @@ export default function ProfilePage() {
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
+      {/* Cover */}
       <div className="relative h-40 w-full overflow-hidden bg-hub-card2">
         {profile.cover_url && <img src={profile.cover_url} alt="Cover" className="h-full w-full object-cover" />}
         <button onClick={() => router.back()} className="absolute left-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white">
@@ -346,6 +328,7 @@ export default function ProfilePage() {
         />
       </div>
 
+      {/* Avatar + info */}
       <div className="px-5">
         <div className="relative -mt-10 h-20 w-20">
           <div className="h-20 w-20 overflow-hidden rounded-full border-4 border-hub-bg bg-hub-card2 flex items-center justify-center text-xl font-semibold text-white">
@@ -443,6 +426,7 @@ export default function ProfilePage() {
           </button>
         </div>
 
+        {/* Stats */}
         <div className="mt-4 flex gap-6 border-t border-hub-border pt-3">
           <div>
             <p className="text-sm font-semibold text-white">{postsCount}</p>
@@ -462,6 +446,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Tabs */}
         <div className="mt-4 flex gap-5 border-b border-hub-border">
           {tabs.map((tab) => (
             <button
@@ -477,6 +462,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {/* Tab content */}
       <div className="mt-3">
         {tabLoading && <p className="px-5 text-center text-sm text-hub-textDim">Loading...</p>}
 
