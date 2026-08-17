@@ -13,11 +13,20 @@ import {
   PhotoIcon,
   VideoIcon,
   MediaPicker,
+  MediaCarousel,
   MAX_MEDIA_PER_TYPE,
   extractHashtags,
   detectCategory,
   linkifyContent,
   timeAgo,
+  reactionSummaryText,
+  REACTIONS,
+  REACTION_TOP,
+  REACTION_BOTTOM,
+  ReactionType,
+  ReactionRecord,
+  Comment,
+  CommentRow,
 } from "@/lib/discover/shared";
 
 type ProfileData = {
@@ -42,9 +51,12 @@ type ProfileData = {
   created_at: string;
 };
 
+type Source = "discover" | "sports";
+
 type UnifiedPost = {
   id: string;
-  source: "discover" | "sports";
+  source: Source;
+  user_id: string;
   text: string | null;
   description: string | null;
   image_urls: string[];
@@ -55,7 +67,7 @@ type UnifiedPost = {
 
 type UnifiedReply = {
   id: string;
-  source: "discover" | "sports";
+  source: Source;
   content: string;
   parentText: string | null;
   created_at: string;
@@ -69,8 +81,26 @@ function joinedLabel(dateStr: string) {
   return `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
 }
 
-function keyFor(source: "discover" | "sports", id: string) {
+function keyFor(source: Source, id: string) {
   return `${source}-${id}`;
+}
+
+function tables(source: Source) {
+  return source === "discover"
+    ? {
+        reactions: "discover_reactions",
+        comments: "discover_comments",
+        commentLikes: "discover_comment_likes",
+        posts: "discover_posts",
+        idField: "post_id",
+      }
+    : {
+        reactions: "sports_update_reactions",
+        comments: "sports_update_comments",
+        commentLikes: "sports_update_comment_likes",
+        posts: "sports_updates",
+        idField: "sports_update_id",
+      };
 }
 
 export default function ProfilePage() {
@@ -79,7 +109,6 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [postsCount, setPostsCount] = useState(0);
   const [savedCount, setSavedCount] = useState(0);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -90,15 +119,28 @@ export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<Tab>("Posts");
   const [posts, setPosts] = useState<UnifiedPost[] | null>(null);
   const [replies, setReplies] = useState<UnifiedReply[] | null>(null);
+  const [repliesError, setRepliesError] = useState<string | null>(null);
   const [saved, setSaved] = useState<UnifiedPost[] | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
 
-  const [reactionCounts, setReactionCounts] = useState<Record<string, number>>({});
-  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  // reactions/comments/bookmarks keyed by "source-id"
+  const [reactionsByKey, setReactionsByKey] = useState<Record<string, ReactionRecord[]>>({});
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
+  const [reactingKey, setReactingKey] = useState<string | null>(null);
+  const [commentsByKey, setCommentsByKey] = useState<Record<string, Comment[]>>({});
+  const [commentLikes, setCommentLikes] = useState<Record<string, { count: number; mine: boolean }>>({});
+  const [commentOpenFor, setCommentOpenFor] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
+  const [commentPosting, setCommentPosting] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<Record<string, { commentId: string; name: string } | null>>({});
+  const commentInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
+  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // ---- Composer state — the ONE place new posts get created.
-  // Category is fully automatic now (detectCategory() runs at post time) —
-  // no field, no picker, nothing for the user to touch. ----
+  // ---- Composer state ----
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerContent, setComposerContent] = useState("");
   const [composerImages, setComposerImages] = useState<File[]>([]);
@@ -106,9 +148,35 @@ export default function ProfilePage() {
   const [composerVisibility, setComposerVisibility] = useState<"public" | "campus">("public");
   const [composerPosting, setComposerPosting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [pendingMediaTrigger, setPendingMediaTrigger] = useState<"image" | "video" | null>(null);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerVideoInputRef = useRef<HTMLInputElement>(null);
   const composerTextRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fires the pending file picker only after the composer (and its inputs) have
+  // actually mounted — fixes Photo/Video buttons doing nothing on first tap.
+  useEffect(() => {
+    if (composerExpanded && pendingMediaTrigger) {
+      if (pendingMediaTrigger === "image") composerImageInputRef.current?.click();
+      if (pendingMediaTrigger === "video") composerVideoInputRef.current?.click();
+      setPendingMediaTrigger(null);
+    }
+  }, [composerExpanded, pendingMediaTrigger]);
+
+  useEffect(() => {
+    function handleDocClick(e: MouseEvent) {
+      if (reactionPickerFor) {
+        const scope = reactionScopeRefs.current[reactionPickerFor];
+        if (scope && !scope.contains(e.target as Node)) setReactionPickerFor(null);
+      }
+      if (menuOpenFor) {
+        const scope = menuScopeRefs.current[menuOpenFor];
+        if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [reactionPickerFor, menuOpenFor]);
 
   useEffect(() => {
     async function init() {
@@ -136,12 +204,11 @@ export default function ProfilePage() {
 
       setProfile(p as ProfileData);
 
-      const [discoverCount, sportsCount, bookmarkCount] = await Promise.all([
-        supabase.from("discover_posts").select("id", { count: "exact", head: true }).eq("user_id", data.user.id),
-        supabase.from("sports_updates").select("id", { count: "exact", head: true }).eq("user_id", data.user.id),
+      const [bookmarkRows, bookmarkCount] = await Promise.all([
+        supabase.from("discover_post_bookmarks").select("post_id").eq("user_id", data.user.id),
         supabase.from("discover_post_bookmarks").select("id", { count: "exact", head: true }).eq("user_id", data.user.id),
       ]);
-      setPostsCount((discoverCount.count ?? 0) + (sportsCount.count ?? 0));
+      if (bookmarkRows.data) setBookmarkedIds(new Set(bookmarkRows.data.map((b: any) => b.post_id)));
       setSavedCount(bookmarkCount.count ?? 0);
 
       setLoading(false);
@@ -150,47 +217,123 @@ export default function ProfilePage() {
     init();
   }, [router]);
 
-  async function loadEngagementCounts(discoverIds: string[], sportsIds: string[]) {
-    const [drRes, dcRes, srRes, scRes] = await Promise.all([
+  async function loadEngagementFor(items: UnifiedPost[]) {
+    const discoverIds = items.filter((p) => p.source === "discover").map((p) => p.id);
+    const sportsIds = items.filter((p) => p.source === "sports").map((p) => p.id);
+
+    const [dr, dc, sr, sc] = await Promise.all([
       discoverIds.length
-        ? supabase.from("discover_reactions").select("post_id").in("post_id", discoverIds)
+        ? supabase.from("discover_reactions").select("post_id, user_id, type, profiles(first_name)").in("post_id", discoverIds)
         : Promise.resolve({ data: [] as any[] }),
       discoverIds.length
-        ? supabase.from("discover_comments").select("post_id").in("post_id", discoverIds)
+        ? supabase.from("discover_comments").select("*, profiles(first_name)").in("post_id", discoverIds).order("created_at", { ascending: true })
         : Promise.resolve({ data: [] as any[] }),
       sportsIds.length
-        ? supabase.from("sports_update_reactions").select("sports_update_id").in("sports_update_id", sportsIds)
+        ? supabase.from("sports_update_reactions").select("sports_update_id, user_id, type, profiles(first_name)").in("sports_update_id", sportsIds)
         : Promise.resolve({ data: [] as any[] }),
       sportsIds.length
-        ? supabase.from("sports_update_comments").select("sports_update_id").in("sports_update_id", sportsIds)
+        ? supabase.from("sports_update_comments").select("*, profiles(first_name)").in("sports_update_id", sportsIds).order("created_at", { ascending: true })
         : Promise.resolve({ data: [] as any[] }),
     ]);
 
-    setReactionCounts((prev) => {
-      const next = { ...prev };
-      (drRes.data ?? []).forEach((r: any) => {
-        const k = keyFor("discover", r.post_id);
-        next[k] = (next[k] ?? 0) + 1;
-      });
-      (srRes.data ?? []).forEach((r: any) => {
-        const k = keyFor("sports", r.sports_update_id);
-        next[k] = (next[k] ?? 0) + 1;
-      });
-      return next;
+    const reactionMap: Record<string, ReactionRecord[]> = {};
+    (dr.data ?? []).forEach((r: any) => {
+      const k = keyFor("discover", r.post_id);
+      if (!reactionMap[k]) reactionMap[k] = [];
+      reactionMap[k].push({ type: r.type, user_id: r.user_id, first_name: r.profiles?.first_name ?? "Student" });
     });
+    (sr.data ?? []).forEach((r: any) => {
+      const k = keyFor("sports", r.sports_update_id);
+      if (!reactionMap[k]) reactionMap[k] = [];
+      reactionMap[k].push({ type: r.type, user_id: r.user_id, first_name: r.profiles?.first_name ?? "Student" });
+    });
+    setReactionsByKey((prev) => ({ ...prev, ...reactionMap }));
 
-    setCommentCounts((prev) => {
-      const next = { ...prev };
-      (dcRes.data ?? []).forEach((c: any) => {
-        const k = keyFor("discover", c.post_id);
-        next[k] = (next[k] ?? 0) + 1;
-      });
-      (scRes.data ?? []).forEach((c: any) => {
-        const k = keyFor("sports", c.sports_update_id);
-        next[k] = (next[k] ?? 0) + 1;
-      });
-      return next;
+    const commentMap: Record<string, Comment[]> = {};
+    const allCommentIds: string[] = [];
+    (dc.data ?? []).forEach((c: any) => {
+      const k = keyFor("discover", c.post_id);
+      if (!commentMap[k]) commentMap[k] = [];
+      commentMap[k].push({ ...c, first_name: c.profiles?.first_name ?? "Student" });
+      allCommentIds.push(c.id);
     });
+    (sc.data ?? []).forEach((c: any) => {
+      const k = keyFor("sports", c.sports_update_id);
+      if (!commentMap[k]) commentMap[k] = [];
+      commentMap[k].push({ ...c, first_name: c.profiles?.first_name ?? "Student" });
+      allCommentIds.push(c.id);
+    });
+    setCommentsByKey((prev) => ({ ...prev, ...commentMap }));
+
+    if (allCommentIds.length > 0) {
+      const [dcl, scl] = await Promise.all([
+        supabase.from("discover_comment_likes").select("comment_id, user_id").in("comment_id", allCommentIds),
+        supabase.from("sports_update_comment_likes").select("comment_id, user_id").in("comment_id", allCommentIds),
+      ]);
+      setCommentLikes((prev) => {
+        const next = { ...prev };
+        allCommentIds.forEach((id) => {
+          if (!next[id]) next[id] = { count: 0, mine: false };
+        });
+        [...(dcl.data ?? []), ...(scl.data ?? [])].forEach((row: any) => {
+          if (!next[row.comment_id]) next[row.comment_id] = { count: 0, mine: false };
+          next[row.comment_id].count += 1;
+          if (row.user_id === userId) next[row.comment_id].mine = true;
+        });
+        return next;
+      });
+    }
+  }
+
+  async function refreshReactionsFor(post: UnifiedPost) {
+    const t = tables(post.source);
+    const { data, error } = await supabase
+      .from(t.reactions)
+      .select(`${t.idField}, user_id, type, profiles(first_name)`)
+      .eq(t.idField, post.id);
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setReactionsByKey((prev) => ({
+      ...prev,
+      [keyFor(post.source, post.id)]: (data ?? []).map((r: any) => ({
+        type: r.type,
+        user_id: r.user_id,
+        first_name: r.profiles?.first_name ?? "Student",
+      })),
+    }));
+  }
+
+  async function refreshCommentsFor(post: UnifiedPost) {
+    const t = tables(post.source);
+    const { data, error } = await supabase
+      .from(t.comments)
+      .select("*, profiles(first_name)")
+      .eq(t.idField, post.id)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    const mapped = (data ?? []).map((c: any) => ({ ...c, first_name: c.profiles?.first_name ?? "Student" }));
+    setCommentsByKey((prev) => ({ ...prev, [keyFor(post.source, post.id)]: mapped }));
+    const ids = mapped.map((c: any) => c.id);
+    if (ids.length > 0) {
+      const { data: likeData } = await supabase.from(t.commentLikes).select("comment_id, user_id").in("comment_id", ids);
+      setCommentLikes((prev) => {
+        const next = { ...prev };
+        ids.forEach((id: string) => {
+          next[id] = { count: 0, mine: false };
+        });
+        (likeData ?? []).forEach((row: any) => {
+          if (!next[row.comment_id]) next[row.comment_id] = { count: 0, mine: false };
+          next[row.comment_id].count += 1;
+          if (row.user_id === userId) next[row.comment_id].mine = true;
+        });
+        return next;
+      });
+    }
   }
 
   async function loadPosts(uid: string) {
@@ -198,22 +341,29 @@ export default function ProfilePage() {
     const [discoverRes, sportsRes] = await Promise.all([
       supabase
         .from("discover_posts")
-        .select("id, content, image_url, video_url, image_urls, video_urls, created_at")
+        .select("id, user_id, content, image_url, video_url, image_urls, video_urls, created_at")
         .eq("user_id", uid)
         .order("created_at", { ascending: false }),
       supabase
         .from("sports_updates")
-        .select("id, title, description, image_url, image_urls, video_urls, category, created_at")
+        .select("id, user_id, title, description, image_url, image_urls, video_urls, category, created_at")
         .eq("user_id", uid)
         .order("created_at", { ascending: false }),
     ]);
 
-    if (discoverRes.error) console.error(discoverRes.error);
-    if (sportsRes.error) console.error(sportsRes.error);
+    if (discoverRes.error) {
+      console.error(discoverRes.error);
+      alert("Load posts failed: " + discoverRes.error.message);
+    }
+    if (sportsRes.error) {
+      console.error(sportsRes.error);
+      alert("Load sports posts failed: " + sportsRes.error.message);
+    }
 
     const discoverMapped: UnifiedPost[] = (discoverRes.data ?? []).map((p: any) => ({
       id: p.id,
       source: "discover",
+      user_id: p.user_id,
       text: p.content,
       description: null,
       image_urls: p.image_urls?.length ? p.image_urls : p.image_url ? [p.image_url] : [],
@@ -223,6 +373,7 @@ export default function ProfilePage() {
     const sportsMapped: UnifiedPost[] = (sportsRes.data ?? []).map((s: any) => ({
       id: s.id,
       source: "sports",
+      user_id: s.user_id,
       text: s.title,
       description: s.description,
       image_urls: s.image_urls?.length ? s.image_urls : s.image_url ? [s.image_url] : [],
@@ -236,15 +387,12 @@ export default function ProfilePage() {
     );
     setPosts(merged);
     setTabLoading(false);
-
-    await loadEngagementCounts(
-      discoverMapped.map((p) => p.id),
-      sportsMapped.map((p) => p.id)
-    );
+    await loadEngagementFor(merged);
   }
 
   async function loadReplies(uid: string) {
     setTabLoading(true);
+    setRepliesError(null);
     const [dc, sc] = await Promise.all([
       supabase
         .from("discover_comments")
@@ -258,8 +406,13 @@ export default function ProfilePage() {
         .order("created_at", { ascending: false }),
     ]);
 
-    if (dc.error) console.error(dc.error);
-    if (sc.error) console.error(sc.error);
+    if (dc.error || sc.error) {
+      const msg = dc.error?.message || sc.error?.message || "unknown error";
+      console.error(dc.error, sc.error);
+      setRepliesError(msg);
+      setTabLoading(false);
+      return;
+    }
 
     const dcMapped: UnifiedReply[] = (dc.data ?? []).map((c: any) => ({
       id: c.id,
@@ -287,7 +440,7 @@ export default function ProfilePage() {
     setTabLoading(true);
     const { data, error } = await supabase
       .from("discover_post_bookmarks")
-      .select("id, created_at, discover_posts(id, content, image_url, image_urls, video_urls, created_at)")
+      .select("id, created_at, discover_posts(id, user_id, content, image_url, image_urls, video_urls, created_at)")
       .eq("user_id", uid)
       .order("created_at", { ascending: false });
 
@@ -303,6 +456,7 @@ export default function ProfilePage() {
       .map((b: any) => ({
         id: b.discover_posts.id,
         source: "discover" as const,
+        user_id: b.discover_posts.user_id,
         text: b.discover_posts.content,
         description: null,
         image_urls: b.discover_posts.image_urls?.length ? b.discover_posts.image_urls : b.discover_posts.image_url ? [b.discover_posts.image_url] : [],
@@ -311,11 +465,7 @@ export default function ProfilePage() {
       }));
     setSaved(mapped);
     setTabLoading(false);
-
-    await loadEngagementCounts(
-      mapped.map((p) => p.id),
-      []
-    );
+    await loadEngagementFor(mapped);
   }
 
   function handleTabClick(tab: Tab) {
@@ -323,6 +473,129 @@ export default function ProfilePage() {
     if (!userId) return;
     if (tab === "Replies" && replies === null) loadReplies(userId);
     if (tab === "Saved" && saved === null) loadSaved(userId);
+  }
+
+  async function pickReaction(post: UnifiedPost, type: ReactionType) {
+    if (!userId) return;
+    const k = keyFor(post.source, post.id);
+    setReactingKey(k);
+    const t = tables(post.source);
+    const existing = (reactionsByKey[k] || []).find((r) => r.user_id === userId);
+    if (existing && existing.type === type) {
+      await supabase.from(t.reactions).delete().eq(t.idField, post.id).eq("user_id", userId);
+    } else {
+      await supabase.from(t.reactions).upsert({ [t.idField]: post.id, user_id: userId, type }, { onConflict: `${t.idField},user_id` });
+    }
+    await refreshReactionsFor(post);
+    setReactingKey(null);
+    setReactionPickerFor(null);
+  }
+
+  function startReply(post: UnifiedPost, commentId: string, name: string) {
+    const k = keyFor(post.source, post.id);
+    setReplyTo((prev) => ({ ...prev, [k]: { commentId, name } }));
+    setCommentOpenFor(k);
+    setTimeout(() => commentInputRefs.current[k]?.focus(), 0);
+  }
+  function cancelReply(k: string) {
+    setReplyTo((prev) => ({ ...prev, [k]: null }));
+  }
+
+  async function toggleCommentLike(post: UnifiedPost, commentId: string) {
+    if (!userId) return;
+    const t = tables(post.source);
+    const current = commentLikes[commentId] || { count: 0, mine: false };
+    if (current.mine) {
+      setCommentLikes((prev) => ({ ...prev, [commentId]: { count: Math.max(0, current.count - 1), mine: false } }));
+      const { error } = await supabase.from(t.commentLikes).delete().eq("comment_id", commentId).eq("user_id", userId);
+      if (error) setCommentLikes((prev) => ({ ...prev, [commentId]: current }));
+    } else {
+      setCommentLikes((prev) => ({ ...prev, [commentId]: { count: current.count + 1, mine: true } }));
+      const { error } = await supabase.from(t.commentLikes).insert({ comment_id: commentId, user_id: userId });
+      if (error) setCommentLikes((prev) => ({ ...prev, [commentId]: current }));
+    }
+  }
+
+  async function submitComment(post: UnifiedPost) {
+    if (!userId) return;
+    const k = keyFor(post.source, post.id);
+    const text = (commentDraft[k] || "").trim();
+    if (!text) return;
+    setCommentPosting(k);
+    const t = tables(post.source);
+    const parentId = replyTo[k]?.commentId ?? null;
+    const { error } = await supabase.from(t.comments).insert({ [t.idField]: post.id, user_id: userId, parent_id: parentId, content: text });
+    setCommentPosting(null);
+    if (error) {
+      alert("Comment failed: " + error.message);
+      return;
+    }
+    setCommentDraft((prev) => ({ ...prev, [k]: "" }));
+    setReplyTo((prev) => ({ ...prev, [k]: null }));
+    await refreshCommentsFor(post);
+  }
+
+  async function toggleBookmark(post: UnifiedPost) {
+    if (!userId || post.source !== "discover") return; // sports has no bookmarks table yet
+    const isSaved = bookmarkedIds.has(post.id);
+    setBookmarkedIds((prev) => {
+      const next = new Set(prev);
+      if (isSaved) next.delete(post.id);
+      else next.add(post.id);
+      return next;
+    });
+    if (isSaved) {
+      await supabase.from("discover_post_bookmarks").delete().eq("post_id", post.id).eq("user_id", userId);
+      setSaved((prev) => (prev ? prev.filter((p) => p.id !== post.id) : prev));
+      setSavedCount((c) => Math.max(0, c - 1));
+    } else {
+      await supabase.from("discover_post_bookmarks").insert({ post_id: post.id, user_id: userId });
+      setSavedCount((c) => c + 1);
+    }
+  }
+
+  async function sharePost(post: UnifiedPost) {
+    const url =
+      post.source === "sports"
+        ? `${window.location.origin}/discover/sports?update=${post.id}`
+        : `${window.location.origin}/discover?post=${post.id}`;
+    const text = post.text?.slice(0, 100) || "Check out this post on Uni.hub";
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Uni.hub", text, url });
+      } catch {}
+    } else {
+      await navigator.clipboard.writeText(url);
+      alert("Link copied to clipboard");
+    }
+    setMenuOpenFor(null);
+  }
+
+  async function copyLink(post: UnifiedPost) {
+    const url =
+      post.source === "sports"
+        ? `${window.location.origin}/discover/sports?update=${post.id}`
+        : `${window.location.origin}/discover?post=${post.id}`;
+    await navigator.clipboard.writeText(url);
+    alert("Link copied to clipboard");
+    setMenuOpenFor(null);
+  }
+
+  async function handleDeletePost(post: UnifiedPost) {
+    if (!userId) return;
+    if (!window.confirm("Delete this post? This can't be undone.")) return;
+    const k = keyFor(post.source, post.id);
+    setDeletingKey(k);
+    const t = tables(post.source);
+    const { error } = await supabase.from(t.posts).delete().eq("id", post.id).eq("user_id", userId);
+    setDeletingKey(null);
+    setMenuOpenFor(null);
+    if (error) {
+      alert("Delete failed: " + error.message);
+      return;
+    }
+    setPosts((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
+    setSaved((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
   }
 
   async function handleAvatarChange(file: File) {
@@ -381,13 +654,11 @@ export default function ProfilePage() {
     setComposerExpanded(true);
     setTimeout(() => composerTextRef.current?.focus(), 0);
   }
-
   function closeComposerIfEmpty() {
     if (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0) {
       setComposerExpanded(false);
     }
   }
-
   function addComposerImages(files: File[]) {
     setComposerImages((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
   }
@@ -433,8 +704,6 @@ export default function ProfilePage() {
     }
 
     const hashtags = extractHashtags(composerContent);
-    // Category is now fully automatic — detected from content/hashtags,
-    // never shown or picked by the user.
     const category = detectCategory(composerContent, hashtags) || "Campus Life";
 
     const { data: inserted, error } = await supabase
@@ -478,7 +747,6 @@ export default function ProfilePage() {
     setComposerVisibility("public");
     setComposerPosting(false);
     setComposerExpanded(false);
-    setPostsCount((c) => c + 1);
     if (userId) await loadPosts(userId);
   }
 
@@ -505,6 +773,152 @@ export default function ProfilePage() {
   const mediaPosts = (posts ?? []).filter((p) => p.image_urls.length > 0 || p.video_urls.length > 0);
   const showUniInfo = profile.show_university_info !== false;
   const hasSocialLinks = profile.website_url || profile.instagram_handle || profile.linkedin_url || profile.twitter_handle;
+  const postsCount = posts?.length ?? 0;
+
+  function renderPostCard(post: UnifiedPost) {
+    const k = keyFor(post.source, post.id);
+    const postReactions = reactionsByKey[k] || [];
+    const myReaction = postReactions.find((r) => r.user_id === userId)?.type ?? null;
+    const activeReactionInfo = REACTIONS.find((r) => r.type === myReaction);
+    const summaryText = reactionSummaryText(postReactions, userId);
+    const allComments = commentsByKey[k] || [];
+    const topLevel = allComments.filter((c) => !c.parent_id);
+    const repliesOf = (id: string) => allComments.filter((c) => c.parent_id === id);
+    const currentReply = replyTo[k];
+    const isMine = post.user_id === userId;
+    const isSaved = post.source === "discover" && bookmarkedIds.has(post.id);
+
+    return (
+      <div key={k} className="relative border-b border-hub-border bg-hub-card px-4 py-3">
+        <div ref={(el) => { menuScopeRefs.current[k] = el; }} className="relative">
+          <div className="flex items-start justify-between">
+            <p className="text-[11px] text-hub-textDim">
+              {timeAgo(post.created_at)}
+              {post.source === "sports" && post.category ? ` · ${post.category}` : ""}
+            </p>
+            <button onClick={() => setMenuOpenFor(menuOpenFor === k ? null : k)} className="shrink-0 text-hub-textDim px-1">
+              <MoreIcon />
+            </button>
+          </div>
+
+          {menuOpenFor === k && (
+            <div className="absolute right-0 top-8 z-20 w-48 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+              <button onClick={() => sharePost(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                <ShareIcon />Share
+              </button>
+              <button onClick={() => copyLink(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">
+                Copy link
+              </button>
+              {isMine && (
+                <>
+                  <div className="my-1 border-t border-hub-border" />
+                  <button
+                    onClick={() => handleDeletePost(post)}
+                    disabled={deletingKey === k}
+                    className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40"
+                  >
+                    {deletingKey === k ? "Deleting..." : "Delete post"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {post.text && <p className="mt-2 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(post.text)}</p>}
+        {post.description && <p className="mt-1 text-xs text-hub-textDim whitespace-pre-wrap">{linkifyContent(post.description)}</p>}
+
+        <MediaCarousel images={post.image_urls} videos={post.video_urls} />
+
+        {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
+
+        <div ref={(el) => { reactionScopeRefs.current[k] = el; }} className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
+          {reactionPickerFor === k && (
+            <div className="absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 rounded-2xl border border-hub-border bg-hub-card2 px-4 py-3 shadow-xl">
+              <div className="flex items-start gap-4">
+                {REACTION_TOP.map((r) => (
+                  <button key={r.type} onClick={() => pickReaction(post, r.type)} disabled={reactingKey === k} className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}>
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                      {r.type === "like" ? <ThumbsUpIcon className="text-white" filled /> : <span className="text-lg leading-none">{r.emoji}</span>}
+                    </span>
+                    <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 flex items-start gap-4">
+                {REACTION_BOTTOM.map((r) => (
+                  <button key={r.type} onClick={() => pickReaction(post, r.type)} disabled={reactingKey === k} className={`flex flex-col items-center gap-1 transition-transform active:scale-110 ${myReaction === r.type ? "scale-105" : ""}`}>
+                    <span className={`flex h-9 w-9 items-center justify-center rounded-full ${r.bg}`}>
+                      <span className="text-lg leading-none">{r.emoji}</span>
+                    </span>
+                    <span className="text-[10px] text-hub-textDim">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-6">
+            <button onClick={() => setReactionPickerFor((prev) => (prev === k ? null : k))} className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? "text-hub-accentLight" : "text-hub-textDim"}`}>
+              {activeReactionInfo ? (activeReactionInfo.type === "like" ? <ThumbsUpIcon className="text-hub-accentLight" filled /> : <span className="text-base leading-none">{activeReactionInfo.emoji}</span>) : <ThumbsUpIcon className="text-hub-textDim" />}
+              {postReactions.length > 0 && <span>{postReactions.length}</span>}
+            </button>
+            <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+              <CommentIcon />
+              {allComments.length > 0 && <span>{allComments.length}</span>}
+            </button>
+            <button onClick={() => sharePost(post)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+              <ShareIcon />
+            </button>
+          </div>
+          {post.source === "discover" && (
+            <button onClick={() => toggleBookmark(post)} className={`shrink-0 ${isSaved ? "text-hub-accentLight" : "text-hub-textDim"}`}>
+              <BookmarkIcon filled={isSaved} />
+            </button>
+          )}
+        </div>
+
+        {commentOpenFor === k && (
+          <div className="mt-3 border-t border-hub-border pt-3">
+            <div className="flex flex-col gap-3 max-h-72 overflow-y-auto">
+              {topLevel.length === 0 && <p className="text-xs text-hub-textDim">No comments yet.</p>}
+              {topLevel.map((c) => (
+                <div key={c.id}>
+                  <CommentRow comment={c} liked={!!commentLikes[c.id]?.mine} likeCount={commentLikes[c.id]?.count ?? 0} onLike={() => toggleCommentLike(post, c.id)} onReply={() => startReply(post, c.id, c.first_name || "them")} />
+                  {repliesOf(c.id).length > 0 && (
+                    <div className="ml-8 mt-2 flex flex-col gap-2">
+                      {repliesOf(c.id).map((r) => (
+                        <CommentRow key={r.id} comment={r} liked={!!commentLikes[r.id]?.mine} likeCount={commentLikes[r.id]?.count ?? 0} onLike={() => toggleCommentLike(post, r.id)} onReply={() => startReply(post, c.id, c.first_name || "them")} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {currentReply && (
+              <div className="mt-2 flex items-center justify-between rounded-md bg-hub-card2 px-2.5 py-1 text-[11px] text-hub-textDim">
+                <span>Replying to {currentReply.name}</span>
+                <button onClick={() => cancelReply(k)} className="text-hub-accentLight">Cancel</button>
+              </div>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                ref={(el) => { commentInputRefs.current[k] = el; }}
+                value={commentDraft[k] || ""}
+                onChange={(e) => setCommentDraft((prev) => ({ ...prev, [k]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") submitComment(post); }}
+                placeholder={currentReply ? `Reply to ${currentReply.name}...` : "Write a comment..."}
+                className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+              />
+              <button onClick={() => submitComment(post)} disabled={commentPosting === k || !(commentDraft[k] || "").trim()} className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40">
+                {commentPosting === k ? "..." : "Send"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -666,7 +1080,6 @@ export default function ProfilePage() {
           ))}
         </div>
 
-        {/* ---- Composer: collapsed pill by default, category is fully automatic ---- */}
         {activeTab === "Posts" && (
           <div className="mt-3 border-b border-hub-border pb-3">
             <div className="flex items-center gap-3 py-2">
@@ -722,10 +1135,7 @@ export default function ProfilePage() {
                 {composerError && <p className="text-xs text-red-400">{composerError}</p>}
 
                 <div className="flex items-center justify-end gap-3 border-t border-hub-border pt-2">
-                  <button
-                    onClick={closeComposerIfEmpty}
-                    className="text-xs font-medium text-hub-textDim"
-                  >
+                  <button onClick={closeComposerIfEmpty} className="text-xs font-medium text-hub-textDim">
                     Cancel
                   </button>
                   <button
@@ -743,7 +1153,7 @@ export default function ProfilePage() {
               <button
                 onClick={() => {
                   openComposer();
-                  composerImageInputRef.current?.click();
+                  setPendingMediaTrigger("image");
                 }}
                 className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-hub-textDim"
               >
@@ -753,7 +1163,7 @@ export default function ProfilePage() {
               <button
                 onClick={() => {
                   openComposer();
-                  composerVideoInputRef.current?.click();
+                  setPendingMediaTrigger("video");
                 }}
                 className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-hub-textDim"
               >
@@ -777,21 +1187,14 @@ export default function ProfilePage() {
         {!tabLoading && activeTab === "Posts" && (
           <>
             {posts && posts.length === 0 && <p className="px-5 text-center text-sm text-hub-textDim">No posts yet.</p>}
-            {(posts ?? []).map((p) => (
-              <PostRow
-                key={`${p.source}-${p.id}`}
-                post={p}
-                reactionCount={reactionCounts[keyFor(p.source, p.id)] ?? 0}
-                commentCount={commentCounts[keyFor(p.source, p.id)] ?? 0}
-                onOpen={() => router.push(p.source === "sports" ? "/discover/sports" : "/discover")}
-              />
-            ))}
+            {(posts ?? []).map(renderPostCard)}
           </>
         )}
 
         {!tabLoading && activeTab === "Replies" && (
           <div className="flex flex-col gap-3 px-5">
-            {replies && replies.length === 0 && <p className="text-center text-sm text-hub-textDim">No replies yet.</p>}
+            {repliesError && <p className="text-center text-sm text-red-400">Couldn&apos;t load replies: {repliesError}</p>}
+            {!repliesError && replies && replies.length === 0 && <p className="text-center text-sm text-hub-textDim">No replies yet.</p>}
             {(replies ?? []).map((r) => (
               <div key={`${r.source}-${r.id}`} className="rounded-lg border border-hub-border bg-hub-card p-3">
                 {r.parentText && <p className="text-[11px] text-hub-textDim">Replying to: {r.parentText.slice(0, 60)}</p>}
@@ -820,78 +1223,13 @@ export default function ProfilePage() {
         {!tabLoading && activeTab === "Saved" && (
           <>
             {saved && saved.length === 0 && <p className="px-5 text-center text-sm text-hub-textDim">Nothing saved yet.</p>}
-            {(saved ?? []).map((p) => (
-              <PostRow
-                key={`saved-${p.id}`}
-                post={p}
-                reactionCount={reactionCounts[keyFor(p.source, p.id)] ?? 0}
-                commentCount={commentCounts[keyFor(p.source, p.id)] ?? 0}
-                onOpen={() => router.push("/discover")}
-              />
-            ))}
+            {(saved ?? []).map(renderPostCard)}
           </>
         )}
       </div>
 
       <BottomNav />
     </main>
-  );
-}
-
-function PostRow({
-  post,
-  reactionCount,
-  commentCount,
-  onOpen,
-}: {
-  post: UnifiedPost;
-  reactionCount: number;
-  commentCount: number;
-  onOpen: () => void;
-}) {
-  return (
-    <button onClick={onOpen} className="flex w-full flex-col border-b border-hub-border bg-hub-card px-5 py-4 text-left">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-hub-textDim">
-          {timeAgo(post.created_at)} {post.source === "sports" && post.category ? `· ${post.category}` : ""}
-        </p>
-        <MoreIcon />
-      </div>
-      {post.text && <p className="mt-1 text-sm text-white/90 line-clamp-3 whitespace-pre-wrap">{linkifyContent(post.text)}</p>}
-      {post.description && <p className="mt-1 text-xs text-hub-textDim line-clamp-2">{post.description}</p>}
-      {(post.image_urls[0] || post.video_urls[0]) && (
-        <div className="mt-2 -mx-5 w-[calc(100%+2.5rem)] overflow-hidden bg-black">
-          {post.image_urls[0] ? (
-            <img
-              src={post.image_urls[0]}
-              alt=""
-              className="block w-full object-contain"
-              style={{ maxHeight: 420 }}
-            />
-          ) : (
-            <video
-              src={post.video_urls[0]}
-              controls
-              preload="metadata"
-              className="block w-full object-contain"
-              style={{ maxHeight: 420 }}
-            />
-          )}
-        </div>
-      )}
-      <div className="mt-3 flex items-center gap-6 text-hub-textDim">
-        <span className="flex items-center gap-1.5">
-          <ThumbsUpIcon />
-          {reactionCount > 0 && <span className="text-xs">{reactionCount}</span>}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <CommentIcon />
-          {commentCount > 0 && <span className="text-xs">{commentCount}</span>}
-        </span>
-        <ShareIcon />
-        <BookmarkIcon filled={false} />
-      </div>
-    </button>
   );
 }
 
