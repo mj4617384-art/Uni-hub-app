@@ -102,6 +102,63 @@ export const SPORTS_CATEGORY_OPTIONS = [
   "Rugby",
 ];
 
+// Real, transparent keyword matching for category suggestion on the
+// composer — no ML model, no fake AI. First category with the most
+// keyword hits wins; ties keep this list's order.
+export const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  Sports: [
+    "football", "basketball", "match", "game", "tournament", "athletics",
+    "volleyball", "score", "team", "championship", "league", "goal",
+    "sport", "sports", "fixture", "kickoff",
+  ],
+  News: [
+    "announcement", "breaking", "news", "alert", "notice", "update",
+    "official", "statement", "policy",
+  ],
+  Study: [
+    "exam", "notes", "assignment", "lecture", "course", "gpa", "cgpa",
+    "revision", "textbook", "tutorial", "past question", "syllabus",
+    "semester", "results",
+  ],
+  Events: [
+    "event", "party", "concert", "seminar", "workshop", "ceremony",
+    "hangout", "meetup", "rsvp", "convocation",
+  ],
+  Marketplace: [
+    "sell", "selling", "buy", "buying", "price", "for sale", "swap",
+    "item", "brand new", "used", "negotiable",
+  ],
+  Clubs: [
+    "club", "society", "association", "fellowship", "chapter", "members",
+  ],
+  Videos: ["video", "watch", "clip", "footage", "reel", "vlog"],
+  "Campus Life": [
+    "hostel", "cafeteria", "campus", "dorm", "roommate", "lecture hall",
+    "gate", "shuttle",
+  ],
+};
+
+export function detectCategory(content: string, hashtags: string[]): string | null {
+  const text = `${content} ${hashtags.join(" ")}`.toLowerCase();
+  if (!text.trim()) return null;
+
+  let bestCategory: string | null = null;
+  let bestScore = 0;
+
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    let score = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestCategory = category;
+    }
+  }
+
+  return bestScore > 0 ? bestCategory : null;
+}
+
 export function linkifyContent(text: string) {
   const parts = text.split(URL_REGEX);
   return parts.map((part, i) =>
