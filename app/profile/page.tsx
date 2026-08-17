@@ -64,17 +64,6 @@ type UnifiedReply = {
 const tabs = ["Posts", "Replies", "Media", "Saved"] as const;
 type Tab = (typeof tabs)[number];
 
-const POST_CATEGORY_OPTIONS = [
-  "Campus Life",
-  "News",
-  "Sports",
-  "Videos",
-  "Clubs",
-  "Events",
-  "Marketplace",
-  "Study",
-];
-
 function joinedLabel(dateStr: string) {
   const d = new Date(dateStr);
   return `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
@@ -107,52 +96,19 @@ export default function ProfilePage() {
   const [reactionCounts, setReactionCounts] = useState<Record<string, number>>({});
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
 
-  // ---- Composer state — the ONE place new posts get created ----
+  // ---- Composer state — the ONE place new posts get created.
+  // Category is fully automatic now (detectCategory() runs at post time) —
+  // no field, no picker, nothing for the user to touch. ----
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerContent, setComposerContent] = useState("");
   const [composerImages, setComposerImages] = useState<File[]>([]);
   const [composerVideos, setComposerVideos] = useState<File[]>([]);
-  const [composerCategory, setComposerCategory] = useState("");
-  const [composerCategoryOpen, setComposerCategoryOpen] = useState(false);
-  const [composerCategoryTouched, setComposerCategoryTouched] = useState(false);
-  const [composerCategoryAutoDetected, setComposerCategoryAutoDetected] = useState(false);
   const [composerVisibility, setComposerVisibility] = useState<"public" | "campus">("public");
   const [composerPosting, setComposerPosting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerVideoInputRef = useRef<HTMLInputElement>(null);
-  const composerCategoryScopeRef = useRef<HTMLDivElement | null>(null);
   const composerTextRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    function handleDocClick(e: MouseEvent) {
-      if (
-        composerCategoryOpen &&
-        composerCategoryScopeRef.current &&
-        !composerCategoryScopeRef.current.contains(e.target as Node)
-      ) {
-        setComposerCategoryOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleDocClick);
-    return () => document.removeEventListener("mousedown", handleDocClick);
-  }, [composerCategoryOpen]);
-
-  // Auto-suggest a category from real keyword/hashtag matches as the user
-  // types — only while they haven't manually touched the category field.
-  useEffect(() => {
-    if (composerCategoryTouched) return;
-    const hashtags = extractHashtags(composerContent);
-    const detected = detectCategory(composerContent, hashtags);
-    if (detected) {
-      setComposerCategory(detected);
-      setComposerCategoryAutoDetected(true);
-    } else if (composerCategoryAutoDetected) {
-      setComposerCategory("");
-      setComposerCategoryAutoDetected(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composerContent]);
 
   useEffect(() => {
     async function init() {
@@ -429,15 +385,8 @@ export default function ProfilePage() {
   function closeComposerIfEmpty() {
     if (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0) {
       setComposerExpanded(false);
-      setComposerCategory("");
-      setComposerCategoryTouched(false);
-      setComposerCategoryAutoDetected(false);
     }
   }
-
-  // ---- Composer logic — writes ONE record to discover_posts + indexes it
-  // into discover_feed_items. This is the single post-creation path for the
-  // whole app; Discover only ever reads from these two tables. ----
 
   function addComposerImages(files: File[]) {
     setComposerImages((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
@@ -451,10 +400,6 @@ export default function ProfilePage() {
   function removeComposerVideo(i: number) {
     setComposerVideos((prev) => prev.filter((_, idx) => idx !== i));
   }
-
-  const filteredComposerCategories = POST_CATEGORY_OPTIONS.filter((opt) =>
-    opt.toLowerCase().includes(composerCategory.toLowerCase())
-  );
 
   async function handleComposerPost() {
     if (!userId || (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0)) return;
@@ -488,7 +433,9 @@ export default function ProfilePage() {
     }
 
     const hashtags = extractHashtags(composerContent);
-    const category = composerCategory.trim() || "Campus Life";
+    // Category is now fully automatic — detected from content/hashtags,
+    // never shown or picked by the user.
+    const category = detectCategory(composerContent, hashtags) || "Campus Life";
 
     const { data: inserted, error } = await supabase
       .from("discover_posts")
@@ -528,9 +475,6 @@ export default function ProfilePage() {
     setComposerContent("");
     setComposerImages([]);
     setComposerVideos([]);
-    setComposerCategory("");
-    setComposerCategoryTouched(false);
-    setComposerCategoryAutoDetected(false);
     setComposerVisibility("public");
     setComposerPosting(false);
     setComposerExpanded(false);
@@ -722,7 +666,7 @@ export default function ProfilePage() {
           ))}
         </div>
 
-        {/* ---- Facebook-style composer: collapsed pill by default, expands on tap ---- */}
+        {/* ---- Composer: collapsed pill by default, category is fully automatic ---- */}
         {activeTab === "Posts" && (
           <div className="mt-3 border-b border-hub-border pb-3">
             <div className="flex items-center gap-3 py-2">
@@ -754,44 +698,7 @@ export default function ProfilePage() {
 
             {composerExpanded && (
               <div className="mt-2 flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <div ref={composerCategoryScopeRef} className="relative flex-1">
-                    <input
-                      value={composerCategory}
-                      onChange={(e) => {
-                        setComposerCategory(e.target.value);
-                        setComposerCategoryTouched(true);
-                        setComposerCategoryAutoDetected(false);
-                        setComposerCategoryOpen(true);
-                      }}
-                      onFocus={() => setComposerCategoryOpen(true)}
-                      placeholder="Category (optional) — e.g. Sports, News..."
-                      className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
-                    />
-                    {composerCategoryAutoDetected && composerCategory && (
-                      <span className="mt-1 block text-[10px] text-hub-accentLight">Auto-detected — tap to change</span>
-                    )}
-                    {composerCategoryOpen && filteredComposerCategories.length > 0 && (
-                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-                        {filteredComposerCategories.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => {
-                              setComposerCategory(opt);
-                              setComposerCategoryTouched(true);
-                              setComposerCategoryAutoDetected(false);
-                              setComposerCategoryOpen(false);
-                            }}
-                            className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
+                <div className="flex justify-end">
                   <select
                     value={composerVisibility}
                     onChange={(e) => setComposerVisibility(e.target.value as "public" | "campus")}
@@ -832,7 +739,6 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* Facebook-style icon row with vertical dividers */}
             <div className="mt-2 flex items-center overflow-hidden rounded-xl border border-hub-border bg-hub-card">
               <button
                 onClick={() => {
