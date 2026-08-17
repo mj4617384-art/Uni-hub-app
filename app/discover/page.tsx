@@ -11,16 +11,11 @@ import {
   REACTIONS,
   REACTION_TOP,
   REACTION_BOTTOM,
-  MAX_MEDIA_PER_TYPE,
   linkifyContent,
-  extractHashtags,
   timeAgo,
   reactionSummaryText,
   MediaCarousel,
-  MediaPicker,
   CommentRow,
-  PhotoIcon,
-  VideoIcon,
   MoreIcon,
   ThumbsUpIcon,
   CommentIcon,
@@ -38,12 +33,9 @@ export default function ForYouPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [content, setContent] = useState("");
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [videoFiles, setVideoFiles] = useState<File[]>([]);
-  const [posting, setPosting] = useState(false);
 
   const [reactionsByPost, setReactionsByPost] = useState<Record<string, ReactionRecord[]>>({});
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
@@ -61,10 +53,7 @@ export default function ForYouPage() {
   const [interestState, setInterestState] = useState<Record<string, "interested" | "not_interested" | null>>({});
   const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({});
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -112,10 +101,11 @@ export default function ForYouPage() {
       setUserId(data.user.id);
       const { data: profile } = await supabase
         .from("profiles")
-        .select("first_name")
+        .select("first_name, avatar_url")
         .eq("id", data.user.id)
         .single();
       setFirstName(profile?.first_name ?? null);
+      setAvatarUrl(profile?.avatar_url ?? null);
       await loadPosts();
       setLoading(false);
     }
@@ -236,71 +226,6 @@ export default function ForYouPage() {
     }
   }
 
-  function addImages(files: File[]) { setImageFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE)); }
-  function addVideos(files: File[]) { setVideoFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE)); }
-  function removeImage(i: number) { setImageFiles((prev) => prev.filter((_, idx) => idx !== i)); }
-  function removeVideo(i: number) { setVideoFiles((prev) => prev.filter((_, idx) => idx !== i)); }
-
-  async function handlePost() {
-    if (!userId || (!content.trim() && imageFiles.length === 0 && videoFiles.length === 0)) return;
-    setPosting(true);
-    setUploadError(null);
-
-    const image_urls: string[] = [];
-    const video_urls: string[] = [];
-
-    for (const file of imageFiles) {
-      const path = `${userId}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await supabase.storage.from("discover-images").upload(path, file);
-      if (upErr) { setUploadError("Image upload failed: " + upErr.message); setPosting(false); return; }
-      const { data: urlData } = supabase.storage.from("discover-images").getPublicUrl(path);
-      image_urls.push(urlData.publicUrl);
-    }
-    for (const file of videoFiles) {
-      const path = `${userId}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await supabase.storage.from("discover-videos").upload(path, file);
-      if (upErr) { setUploadError("Video upload failed: " + upErr.message); setPosting(false); return; }
-      const { data: urlData } = supabase.storage.from("discover-videos").getPublicUrl(path);
-      video_urls.push(urlData.publicUrl);
-    }
-
-    const hashtags = extractHashtags(content);
-
-    const { data: inserted, error } = await supabase
-      .from("discover_posts")
-      .insert({
-        user_id: userId,
-        content: content.trim() || null,
-        image_url: image_urls[0] ?? null,
-        video_url: video_urls[0] ?? null,
-        image_urls,
-        video_urls,
-        hashtags,
-      })
-      .select("id, category, visibility, created_at")
-      .single();
-
-    if (error) { setUploadError("Post failed: " + error.message); setPosting(false); return; }
-
-    // Keep the unified feed index in sync so this post is discoverable
-    // through the same system Sports/News/etc. write into.
-    if (inserted) {
-      const { error: feedErr } = await supabase.from("discover_feed_items").insert({
-        source_type: "discover_post",
-        source_id: inserted.id,
-        user_id: userId,
-        category: inserted.category ?? "campus_life",
-        visibility: inserted.visibility ?? "public",
-        created_at: inserted.created_at,
-      });
-      if (feedErr) console.error("Feed index insert failed:", feedErr);
-    }
-
-    setContent(""); setImageFiles([]); setVideoFiles([]);
-    await loadPosts();
-    setPosting(false);
-  }
-
   async function handleDeletePost(postId: string) {
     if (!userId) return;
     if (!window.confirm("Delete this post? This can't be undone.")) return;
@@ -308,6 +233,8 @@ export default function ForYouPage() {
     const { error } = await supabase.from("discover_posts").delete().eq("id", postId).eq("user_id", userId);
     setDeletingId(null); setMenuOpenFor(null);
     if (error) { alert("Delete failed: " + error.message); return; }
+    // Keep the feed index in sync — no orphaned copy left behind
+    await supabase.from("discover_feed_items").delete().eq("source_type", "discover_post").eq("source_id", postId);
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   }
 
@@ -384,50 +311,16 @@ export default function ForYouPage() {
 
   return (
     <>
-      <div className="mx-5 mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
-        <div className="flex items-start gap-3">
-          <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-            {firstName ? firstName.charAt(0).toUpperCase() : "U"}
-          </div>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="What's happening on campus?"
-            rows={2}
-            className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-          />
+      {/* Posting now happens from Profile — Discover only discovers content */}
+      <button
+        onClick={() => router.push("/profile")}
+        className="mx-5 mt-4 flex w-[calc(100%-2.5rem)] items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+      >
+        <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white overflow-hidden">
+          {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : (firstName ? firstName.charAt(0).toUpperCase() : "U")}
         </div>
-
-        <MediaPicker
-          images={imageFiles}
-          videos={videoFiles}
-          onAddImages={addImages}
-          onAddVideos={addVideos}
-          onRemoveImage={removeImage}
-          onRemoveVideo={removeVideo}
-          imageInputRef={imageInputRef}
-          videoInputRef={videoInputRef}
-        />
-        {uploadError && <p className="mt-2 text-xs text-red-400">{uploadError}</p>}
-
-        <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-          <div className="flex items-center gap-5">
-            <button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageFiles.length >= MAX_MEDIA_PER_TYPE} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40">
-              <PhotoIcon /><span>Photo {imageFiles.length > 0 ? `(${imageFiles.length}/5)` : ""}</span>
-            </button>
-            <button type="button" onClick={() => videoInputRef.current?.click()} disabled={videoFiles.length >= MAX_MEDIA_PER_TYPE} className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40">
-              <VideoIcon /><span>Video {videoFiles.length > 0 ? `(${videoFiles.length}/5)` : ""}</span>
-            </button>
-          </div>
-          <button
-            onClick={handlePost}
-            disabled={posting || (!content.trim() && imageFiles.length === 0 && videoFiles.length === 0)}
-            className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-          >
-            {posting ? "Posting..." : "Post"}
-          </button>
-        </div>
-      </div>
+        <span className="text-sm text-hub-textDim">Share something from your Profile...</span>
+      </button>
 
       <div className="mt-4">
         {posts.length === 0 && <p className="px-5 text-center text-sm text-hub-textDim">No posts yet — be the first to share something!</p>}
