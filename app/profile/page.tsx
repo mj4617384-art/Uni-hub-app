@@ -15,6 +15,7 @@ import {
   MediaPicker,
   MAX_MEDIA_PER_TYPE,
   extractHashtags,
+  detectCategory,
   linkifyContent,
   timeAgo,
 } from "@/lib/discover/shared";
@@ -112,6 +113,8 @@ export default function ProfilePage() {
   const [composerVideos, setComposerVideos] = useState<File[]>([]);
   const [composerCategory, setComposerCategory] = useState("");
   const [composerCategoryOpen, setComposerCategoryOpen] = useState(false);
+  const [composerCategoryTouched, setComposerCategoryTouched] = useState(false);
+  const [composerCategoryAutoDetected, setComposerCategoryAutoDetected] = useState(false);
   const [composerVisibility, setComposerVisibility] = useState<"public" | "campus">("public");
   const [composerPosting, setComposerPosting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
@@ -132,6 +135,22 @@ export default function ProfilePage() {
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
   }, [composerCategoryOpen]);
+
+  // Auto-suggest a category from real keyword/hashtag matches as the user
+  // types — only while they haven't manually touched the category field.
+  useEffect(() => {
+    if (composerCategoryTouched) return;
+    const hashtags = extractHashtags(composerContent);
+    const detected = detectCategory(composerContent, hashtags);
+    if (detected) {
+      setComposerCategory(detected);
+      setComposerCategoryAutoDetected(true);
+    } else if (composerCategoryAutoDetected) {
+      setComposerCategory("");
+      setComposerCategoryAutoDetected(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerContent]);
 
   useEffect(() => {
     async function init() {
@@ -494,6 +513,8 @@ export default function ProfilePage() {
     setComposerImages([]);
     setComposerVideos([]);
     setComposerCategory("");
+    setComposerCategoryTouched(false);
+    setComposerCategoryAutoDetected(false);
     setComposerVisibility("public");
     setComposerPosting(false);
     setPostsCount((c) => c + 1);
@@ -707,12 +728,17 @@ export default function ProfilePage() {
                   value={composerCategory}
                   onChange={(e) => {
                     setComposerCategory(e.target.value);
+                    setComposerCategoryTouched(true);
+                    setComposerCategoryAutoDetected(false);
                     setComposerCategoryOpen(true);
                   }}
                   onFocus={() => setComposerCategoryOpen(true)}
                   placeholder="Category (optional) — e.g. Sports, News..."
                   className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
                 />
+                {composerCategoryAutoDetected && composerCategory && (
+                  <span className="mt-1 block text-[10px] text-hub-accentLight">Auto-detected — tap to change</span>
+                )}
                 {composerCategoryOpen && filteredComposerCategories.length > 0 && (
                   <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
                     {filteredComposerCategories.map((opt) => (
@@ -721,6 +747,8 @@ export default function ProfilePage() {
                         type="button"
                         onClick={() => {
                           setComposerCategory(opt);
+                          setComposerCategoryTouched(true);
+                          setComposerCategoryAutoDetected(false);
                           setComposerCategoryOpen(false);
                         }}
                         className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
