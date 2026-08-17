@@ -11,16 +11,11 @@ import {
   REACTIONS,
   REACTION_TOP,
   REACTION_BOTTOM,
-  MAX_MEDIA_PER_TYPE,
-  SPORTS_CATEGORY_OPTIONS,
   linkifyContent,
   timeAgo,
   reactionSummaryText,
   MediaCarousel,
-  MediaPicker,
   CommentRow,
-  PhotoIcon,
-  VideoIcon,
   MoreIcon,
   ThumbsUpIcon,
   CommentIcon,
@@ -32,38 +27,15 @@ import {
   LinkIcon,
   PlusCircleIcon,
   MinusCircleIcon,
-  TrophyIcon,
 } from "@/lib/discover/shared";
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      className={`transition-transform ${open ? "rotate-180" : ""}`}
-    >
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 export default function SportsPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
   const [updates, setUpdates] = useState<SportsUpdate[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [categoryOpen, setCategoryOpen] = useState(false);
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [videoFiles, setVideoFiles] = useState<File[]>([]);
-  const [posting, setPosting] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const [reactionsByUpdate, setReactionsByUpdate] = useState<Record<string, ReactionRecord[]>>({});
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
@@ -82,10 +54,7 @@ export default function SportsPage() {
   const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({});
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
 
-  const categoryScopeRef = useRef<HTMLDivElement | null>(null);
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
@@ -117,13 +86,10 @@ export default function SportsPage() {
         const scope = menuScopeRefs.current[menuOpenFor];
         if (scope && !scope.contains(e.target as Node)) setMenuOpenFor(null);
       }
-      if (categoryOpen && categoryScopeRef.current && !categoryScopeRef.current.contains(e.target as Node)) {
-        setCategoryOpen(false);
-      }
     }
     document.addEventListener("mousedown", handleDocClick);
     return () => document.removeEventListener("mousedown", handleDocClick);
-  }, [reactionPickerFor, menuOpenFor, categoryOpen]);
+  }, [reactionPickerFor, menuOpenFor]);
 
   useEffect(() => {
     async function init() {
@@ -135,10 +101,11 @@ export default function SportsPage() {
       setUserId(data.user.id);
       const { data: profile } = await supabase
         .from("profiles")
-        .select("first_name")
+        .select("first_name, avatar_url")
         .eq("id", data.user.id)
         .single();
       setFirstName(profile?.first_name ?? null);
+      setAvatarUrl(profile?.avatar_url ?? null);
       await loadUpdates();
       setLoading(false);
     }
@@ -295,93 +262,6 @@ export default function SportsPage() {
     }
   }
 
-  function addImages(files: File[]) {
-    setImageFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
-  }
-  function addVideos(files: File[]) {
-    setVideoFiles((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
-  }
-  function removeImage(i: number) {
-    setImageFiles((prev) => prev.filter((_, idx) => idx !== i));
-  }
-  function removeVideo(i: number) {
-    setVideoFiles((prev) => prev.filter((_, idx) => idx !== i));
-  }
-
-  async function handlePost() {
-    if (!userId || !title.trim()) return;
-    setPosting(true);
-    setUploadError(null);
-
-    const image_urls: string[] = [];
-    const video_urls: string[] = [];
-
-    for (const file of imageFiles) {
-      const path = `${userId}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await supabase.storage.from("sports-images").upload(path, file);
-      if (upErr) {
-        setUploadError("Image upload failed: " + upErr.message);
-        setPosting(false);
-        return;
-      }
-      const { data: urlData } = supabase.storage.from("sports-images").getPublicUrl(path);
-      image_urls.push(urlData.publicUrl);
-    }
-    for (const file of videoFiles) {
-      const path = `${userId}/${Date.now()}-${file.name}`;
-      const { error: upErr } = await supabase.storage.from("sports-videos").upload(path, file);
-      if (upErr) {
-        setUploadError("Video upload failed: " + upErr.message);
-        setPosting(false);
-        return;
-      }
-      const { data: urlData } = supabase.storage.from("sports-videos").getPublicUrl(path);
-      video_urls.push(urlData.publicUrl);
-    }
-
-    const { data: inserted, error } = await supabase
-      .from("sports_updates")
-      .insert({
-        user_id: userId,
-        title: title.trim(),
-        description: description.trim() || null,
-        category: category.trim() || "General",
-        image_url: image_urls[0] ?? null,
-        image_urls,
-        video_urls,
-      })
-      .select("id, created_at")
-      .single();
-
-    if (error) {
-      setUploadError("Post failed: " + error.message);
-      setPosting(false);
-      return;
-    }
-
-    // Keep the unified feed index in sync — this is what lets Sports posts
-    // surface into the merged For You feed later.
-    if (inserted) {
-      const { error: feedErr } = await supabase.from("discover_feed_items").insert({
-        source_type: "sports_update",
-        source_id: inserted.id,
-        user_id: userId,
-        category: "sports",
-        visibility: "public",
-        created_at: inserted.created_at,
-      });
-      if (feedErr) console.error("Feed index insert failed:", feedErr);
-    }
-
-    setTitle("");
-    setDescription("");
-    setCategory("");
-    setImageFiles([]);
-    setVideoFiles([]);
-    await loadUpdates();
-    setPosting(false);
-  }
-
   async function handleDeleteUpdate(updateId: string) {
     if (!userId) return;
     if (!window.confirm("Delete this update? This can't be undone.")) return;
@@ -494,10 +374,6 @@ export default function SportsPage() {
     setMenuOpenFor(null);
   }
 
-  const filteredCategoryOptions = SPORTS_CATEGORY_OPTIONS.filter((opt) =>
-    opt.toLowerCase().includes(category.toLowerCase())
-  );
-
   if (loading) {
     return (
       <div className="flex h-[60vh] items-center justify-center">
@@ -508,103 +384,18 @@ export default function SportsPage() {
 
   return (
     <>
-      <div className="mx-5 mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
-        <div className="flex items-center gap-2">
-          <TrophyIcon small />
-          <span className="text-xs font-medium text-hub-textDim">Post a sports update</span>
+      {/* Posting now happens from Profile — new Sports posts should be
+          created there with category "Sports". Existing legacy
+          sports_updates content below keeps working untouched. */}
+      <button
+        onClick={() => router.push("/profile")}
+        className="mx-5 mt-4 flex w-[calc(100%-2.5rem)] items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+      >
+        <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white overflow-hidden">
+          {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : (firstName ? firstName.charAt(0).toUpperCase() : "U")}
         </div>
-
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Title — e.g. UNILAG vs UI final score"
-          className="mt-2 w-full bg-transparent text-sm font-medium text-white placeholder:text-hub-textDim outline-none"
-        />
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Add more details..."
-          rows={2}
-          className="mt-1 w-full resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-        />
-
-        <div ref={categoryScopeRef} className="relative mt-2">
-          <div className="flex items-center gap-2 rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5">
-            <input
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
-                setCategoryOpen(true);
-              }}
-              onFocus={() => setCategoryOpen(true)}
-              placeholder="Category — e.g. Football"
-              className="flex-1 bg-transparent text-xs text-white placeholder:text-hub-textDim outline-none"
-            />
-            <button type="button" onClick={() => setCategoryOpen((v) => !v)} className="shrink-0 text-hub-textDim">
-              <ChevronIcon open={categoryOpen} />
-            </button>
-          </div>
-          {categoryOpen && filteredCategoryOptions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-              {filteredCategoryOptions.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    setCategory(opt);
-                    setCategoryOpen(false);
-                  }}
-                  className="block w-full px-3 py-2 text-left text-xs text-white"
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <MediaPicker
-          images={imageFiles}
-          videos={videoFiles}
-          onAddImages={addImages}
-          onAddVideos={addVideos}
-          onRemoveImage={removeImage}
-          onRemoveVideo={removeVideo}
-          imageInputRef={imageInputRef}
-          videoInputRef={videoInputRef}
-        />
-        {uploadError && <p className="mt-2 text-xs text-red-400">{uploadError}</p>}
-
-        <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-          <div className="flex items-center gap-5">
-            <button
-              type="button"
-              onClick={() => imageInputRef.current?.click()}
-              disabled={imageFiles.length >= MAX_MEDIA_PER_TYPE}
-              className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
-            >
-              <PhotoIcon />
-              <span>Photo {imageFiles.length > 0 ? `(${imageFiles.length}/5)` : ""}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => videoInputRef.current?.click()}
-              disabled={videoFiles.length >= MAX_MEDIA_PER_TYPE}
-              className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
-            >
-              <VideoIcon />
-              <span>Video {videoFiles.length > 0 ? `(${videoFiles.length}/5)` : ""}</span>
-            </button>
-          </div>
-          <button
-            onClick={handlePost}
-            disabled={posting || !title.trim()}
-            className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-          >
-            {posting ? "Posting..." : "Post"}
-          </button>
-        </div>
-      </div>
+        <span className="text-sm text-hub-textDim">Share a sports update from your Profile...</span>
+      </button>
 
       <div className="mt-4">
         {updates.length === 0 && (
