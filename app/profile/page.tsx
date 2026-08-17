@@ -108,6 +108,7 @@ export default function ProfilePage() {
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
 
   // ---- Composer state — the ONE place new posts get created ----
+  const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerContent, setComposerContent] = useState("");
   const [composerImages, setComposerImages] = useState<File[]>([]);
   const [composerVideos, setComposerVideos] = useState<File[]>([]);
@@ -121,6 +122,7 @@ export default function ProfilePage() {
   const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerVideoInputRef = useRef<HTMLInputElement>(null);
   const composerCategoryScopeRef = useRef<HTMLDivElement | null>(null);
+  const composerTextRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     function handleDocClick(e: MouseEvent) {
@@ -419,6 +421,20 @@ export default function ProfilePage() {
     }
   }
 
+  function openComposer() {
+    setComposerExpanded(true);
+    setTimeout(() => composerTextRef.current?.focus(), 0);
+  }
+
+  function closeComposerIfEmpty() {
+    if (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0) {
+      setComposerExpanded(false);
+      setComposerCategory("");
+      setComposerCategoryTouched(false);
+      setComposerCategoryAutoDetected(false);
+    }
+  }
+
   // ---- Composer logic — writes ONE record to discover_posts + indexes it
   // into discover_feed_items. This is the single post-creation path for the
   // whole app; Discover only ever reads from these two tables. ----
@@ -517,6 +533,7 @@ export default function ProfilePage() {
     setComposerCategoryAutoDetected(false);
     setComposerVisibility("public");
     setComposerPosting(false);
+    setComposerExpanded(false);
     setPostsCount((c) => c + 1);
     if (userId) await loadPosts(userId);
   }
@@ -705,117 +722,143 @@ export default function ProfilePage() {
           ))}
         </div>
 
+        {/* ---- Facebook-style composer: collapsed pill by default, expands on tap ---- */}
         {activeTab === "Posts" && (
-          <div className="mt-4 rounded-2xl border border-hub-border bg-hub-card p-4">
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+          <div className="mt-3 border-b border-hub-border pb-3">
+            <div className="flex items-center gap-3 py-2">
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
                 {profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
+                  <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
                 ) : (
                   fullName.charAt(0).toUpperCase()
                 )}
               </div>
-              <textarea
-                value={composerContent}
-                onChange={(e) => setComposerContent(e.target.value)}
-                placeholder="What's happening on campus?"
-                rows={2}
-                className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-              />
-            </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <div ref={composerCategoryScopeRef} className="relative flex-1">
-                <input
-                  value={composerCategory}
-                  onChange={(e) => {
-                    setComposerCategory(e.target.value);
-                    setComposerCategoryTouched(true);
-                    setComposerCategoryAutoDetected(false);
-                    setComposerCategoryOpen(true);
-                  }}
-                  onFocus={() => setComposerCategoryOpen(true)}
-                  placeholder="Category (optional) — e.g. Sports, News..."
-                  className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+              {!composerExpanded ? (
+                <button
+                  onClick={openComposer}
+                  className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-4 py-2.5 text-left text-sm text-hub-textDim"
+                >
+                  What&apos;s happening on campus?
+                </button>
+              ) : (
+                <textarea
+                  ref={composerTextRef}
+                  value={composerContent}
+                  onChange={(e) => setComposerContent(e.target.value)}
+                  placeholder="What's happening on campus?"
+                  rows={2}
+                  className="flex-1 resize-none rounded-2xl border border-hub-border bg-hub-card2 px-4 py-2.5 text-sm text-white placeholder:text-hub-textDim outline-none"
                 />
-                {composerCategoryAutoDetected && composerCategory && (
-                  <span className="mt-1 block text-[10px] text-hub-accentLight">Auto-detected — tap to change</span>
-                )}
-                {composerCategoryOpen && filteredComposerCategories.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
-                    {filteredComposerCategories.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => {
-                          setComposerCategory(opt);
-                          setComposerCategoryTouched(true);
-                          setComposerCategoryAutoDetected(false);
-                          setComposerCategoryOpen(false);
-                        }}
-                        className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <select
-                value={composerVisibility}
-                onChange={(e) => setComposerVisibility(e.target.value as "public" | "campus")}
-                className="shrink-0 rounded-lg border border-hub-border bg-hub-card2 px-2 py-1.5 text-xs text-white outline-none"
-              >
-                <option value="public">Public</option>
-                <option value="campus">Campus only</option>
-              </select>
+              )}
             </div>
 
-            <MediaPicker
-              images={composerImages}
-              videos={composerVideos}
-              onAddImages={addComposerImages}
-              onAddVideos={addComposerVideos}
-              onRemoveImage={removeComposerImage}
-              onRemoveVideo={removeComposerVideo}
-              imageInputRef={composerImageInputRef}
-              videoInputRef={composerVideoInputRef}
-            />
-            {composerError && <p className="mt-2 text-xs text-red-400">{composerError}</p>}
+            {composerExpanded && (
+              <div className="mt-2 flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <div ref={composerCategoryScopeRef} className="relative flex-1">
+                    <input
+                      value={composerCategory}
+                      onChange={(e) => {
+                        setComposerCategory(e.target.value);
+                        setComposerCategoryTouched(true);
+                        setComposerCategoryAutoDetected(false);
+                        setComposerCategoryOpen(true);
+                      }}
+                      onFocus={() => setComposerCategoryOpen(true)}
+                      placeholder="Category (optional) — e.g. Sports, News..."
+                      className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+                    />
+                    {composerCategoryAutoDetected && composerCategory && (
+                      <span className="mt-1 block text-[10px] text-hub-accentLight">Auto-detected — tap to change</span>
+                    )}
+                    {composerCategoryOpen && filteredComposerCategories.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                        {filteredComposerCategories.map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              setComposerCategory(opt);
+                              setComposerCategoryTouched(true);
+                              setComposerCategoryAutoDetected(false);
+                              setComposerCategoryOpen(false);
+                            }}
+                            className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
 
-            <div className="mt-4 flex items-center justify-between border-t border-hub-border pt-4">
-              <div className="flex items-center gap-6">
-                <button
-                  type="button"
-                  onClick={() => composerImageInputRef.current?.click()}
-                  disabled={composerImages.length >= MAX_MEDIA_PER_TYPE}
-                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
-                >
-                  <PhotoIcon /><span>Photo {composerImages.length > 0 ? `(${composerImages.length}/5)` : ""}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => composerVideoInputRef.current?.click()}
-                  disabled={composerVideos.length >= MAX_MEDIA_PER_TYPE}
-                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
-                >
-                  <VideoIcon /><span>Video {composerVideos.length > 0 ? `(${composerVideos.length}/5)` : ""}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.push("/create-poll")}
-                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
-                >
-                  <PollIcon /><span>Poll</span>
-                </button>
+                  <select
+                    value={composerVisibility}
+                    onChange={(e) => setComposerVisibility(e.target.value as "public" | "campus")}
+                    className="shrink-0 rounded-lg border border-hub-border bg-hub-card2 px-2 py-1.5 text-xs text-white outline-none"
+                  >
+                    <option value="public">Public</option>
+                    <option value="campus">Campus only</option>
+                  </select>
+                </div>
+
+                <MediaPicker
+                  images={composerImages}
+                  videos={composerVideos}
+                  onAddImages={addComposerImages}
+                  onAddVideos={addComposerVideos}
+                  onRemoveImage={removeComposerImage}
+                  onRemoveVideo={removeComposerVideo}
+                  imageInputRef={composerImageInputRef}
+                  videoInputRef={composerVideoInputRef}
+                />
+                {composerError && <p className="text-xs text-red-400">{composerError}</p>}
+
+                <div className="flex items-center justify-end gap-3 border-t border-hub-border pt-2">
+                  <button
+                    onClick={closeComposerIfEmpty}
+                    className="text-xs font-medium text-hub-textDim"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleComposerPost}
+                    disabled={composerPosting || (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0)}
+                    className="rounded-full bg-hub-accentLight px-5 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                  >
+                    {composerPosting ? "Posting..." : "Post"}
+                  </button>
+                </div>
               </div>
+            )}
+
+            {/* Facebook-style icon row with vertical dividers */}
+            <div className="mt-2 flex items-center overflow-hidden rounded-xl border border-hub-border bg-hub-card">
               <button
-                onClick={handleComposerPost}
-                disabled={composerPosting || (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0)}
-                className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                onClick={() => {
+                  openComposer();
+                  composerImageInputRef.current?.click();
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-hub-textDim"
               >
-                {composerPosting ? "Posting..." : "Post"}
+                <span className="text-green-400"><PhotoIcon /></span> Photo
+              </button>
+              <div className="h-6 w-px shrink-0 bg-hub-border" />
+              <button
+                onClick={() => {
+                  openComposer();
+                  composerVideoInputRef.current?.click();
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-hub-textDim"
+              >
+                <span className="text-orange-400"><VideoIcon /></span> Video
+              </button>
+              <div className="h-6 w-px shrink-0 bg-hub-border" />
+              <button
+                onClick={() => router.push("/create-poll")}
+                className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-hub-textDim"
+              >
+                <span className="text-purple-400"><PollIcon /></span> Poll
               </button>
             </div>
           </div>
