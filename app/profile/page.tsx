@@ -571,8 +571,8 @@ export default function ProfilePage() {
       </div>
 
       <div className="px-5">
-        <div className="relative -mt-10 h-20 w-20">
-          <div className="h-20 w-20 overflow-hidden rounded-full border-4 border-hub-bg bg-hub-card2 flex items-center justify-center text-xl font-semibold text-white">
+        <div className="relative -mt-12 h-24 w-24">
+          <div className="h-24 w-24 overflow-hidden rounded-full border-4 border-hub-bg bg-hub-card2 flex items-center justify-center text-2xl font-semibold text-white">
             {profile.avatar_url ? (
               <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
             ) : (
@@ -662,40 +662,42 @@ export default function ProfilePage() {
         )}
 
         <div className="mt-4 flex gap-2">
-          <button onClick={() => router.push("/profile/edit")} className="flex-1 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
+          <button onClick={() => router.push("/profile/edit")} className="flex-1 rounded-full bg-hub-accentLight py-2.5 text-sm font-semibold text-white active:opacity-80">
             Edit Profile
           </button>
-          <button onClick={shareProfile} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-hub-border py-2 text-xs font-medium text-white">
-            <ShareIcon /> Share Profile
+          <button onClick={shareProfile} className="flex-1 flex items-center justify-center gap-1.5 rounded-full border border-hub-border py-2.5 text-sm font-semibold text-white active:bg-hub-card2">
+            <ShareIcon /> Share
           </button>
         </div>
 
-        <div className="mt-4 flex gap-6 border-t border-hub-border pt-3">
-          <div>
-            <p className="text-sm font-semibold text-white">{postsCount}</p>
+        <div className="mt-5 grid grid-cols-4 border-y border-hub-border py-3">
+          <div className="flex flex-col items-center">
+            <p className="text-base font-semibold text-white">{postsCount}</p>
             <p className="text-[11px] text-hub-textDim">Posts</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white">0</p>
+          <div className="flex flex-col items-center border-l border-hub-border">
+            <p className="text-base font-semibold text-white">0</p>
             <p className="text-[11px] text-hub-textDim">Followers</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white">0</p>
+          <div className="flex flex-col items-center border-l border-hub-border">
+            <p className="text-base font-semibold text-white">0</p>
             <p className="text-[11px] text-hub-textDim">Following</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white">{savedCount}</p>
+          <div className="flex flex-col items-center border-l border-hub-border">
+            <p className="text-base font-semibold text-white">{savedCount}</p>
             <p className="text-[11px] text-hub-textDim">Saved</p>
           </div>
         </div>
 
-        <div className="mt-4 flex gap-5 border-b border-hub-border">
+        <div className="mt-1 flex border-b border-hub-border">
           {tabs.map((tab) => (
             <button
               key={tab}
               onClick={() => handleTabClick(tab)}
-              className={`pb-2 text-sm ${
-                activeTab === tab ? "text-hub-accentLight border-b-2 border-hub-accentLight font-medium" : "text-hub-textDim"
+              className={`flex-1 py-3 text-sm font-medium transition-colors ${
+                activeTab === tab
+                  ? "text-hub-accentLight border-b-2 border-hub-accentLight"
+                  : "text-hub-textDim border-b-2 border-transparent"
               }`}
             >
               {tab}
@@ -704,9 +706,9 @@ export default function ProfilePage() {
         </div>
 
         {activeTab === "Posts" && (
-          <div className="mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
+          <div className="mt-4 rounded-2xl border border-hub-border bg-hub-card p-4">
             <div className="flex items-start gap-3">
-              <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+              <div className="h-10 w-10 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
                 {profile.avatar_url ? (
                   <img src={profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
                 ) : (
@@ -782,8 +784,8 @@ export default function ProfilePage() {
             />
             {composerError && <p className="mt-2 text-xs text-red-400">{composerError}</p>}
 
-            <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
-              <div className="flex items-center gap-5">
+            <div className="mt-4 flex items-center justify-between border-t border-hub-border pt-4">
+              <div className="flex items-center gap-6">
                 <button
                   type="button"
                   onClick={() => composerImageInputRef.current?.click()}
@@ -899,7 +901,7 @@ function PostRow({
   onOpen: () => void;
 }) {
   return (
-    <button onClick={onOpen} className="flex w-full flex-col border-b border-hub-border bg-hub-card px-5 py-3 text-left">
+    <button onClick={onOpen} className="flex w-full flex-col border-b border-hub-border bg-hub-card px-5 py-4 text-left">
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-hub-textDim">
           {timeAgo(post.created_at)} {post.source === "sports" && post.category ? `· ${post.category}` : ""}
@@ -928,7 +930,7 @@ function PostRow({
           )}
         </div>
       )}
-      <div className="mt-2 flex items-center gap-5 text-hub-textDim">
+      <div className="mt-3 flex items-center gap-6 text-hub-textDim">
         <span className="flex items-center gap-1.5">
           <ThumbsUpIcon />
           {reactionCount > 0 && <span className="text-xs">{reactionCount}</span>}
