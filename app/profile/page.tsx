@@ -10,6 +10,11 @@ import {
   ThumbsUpIcon,
   CommentIcon,
   BookmarkIcon,
+  PhotoIcon,
+  VideoIcon,
+  MediaPicker,
+  MAX_MEDIA_PER_TYPE,
+  extractHashtags,
   linkifyContent,
   timeAgo,
 } from "@/lib/discover/shared";
@@ -58,6 +63,17 @@ type UnifiedReply = {
 const tabs = ["Posts", "Replies", "Media", "Saved"] as const;
 type Tab = (typeof tabs)[number];
 
+const POST_CATEGORY_OPTIONS = [
+  "Campus Life",
+  "News",
+  "Sports",
+  "Videos",
+  "Clubs",
+  "Events",
+  "Marketplace",
+  "Study",
+];
+
 function joinedLabel(dateStr: string) {
   const d = new Date(dateStr);
   return `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
@@ -89,6 +105,33 @@ export default function ProfilePage() {
 
   const [reactionCounts, setReactionCounts] = useState<Record<string, number>>({});
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+
+  // ---- Composer state — the ONE place new posts get created ----
+  const [composerContent, setComposerContent] = useState("");
+  const [composerImages, setComposerImages] = useState<File[]>([]);
+  const [composerVideos, setComposerVideos] = useState<File[]>([]);
+  const [composerCategory, setComposerCategory] = useState("");
+  const [composerCategoryOpen, setComposerCategoryOpen] = useState(false);
+  const [composerVisibility, setComposerVisibility] = useState<"public" | "campus">("public");
+  const [composerPosting, setComposerPosting] = useState(false);
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const composerImageInputRef = useRef<HTMLInputElement>(null);
+  const composerVideoInputRef = useRef<HTMLInputElement>(null);
+  const composerCategoryScopeRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    function handleDocClick(e: MouseEvent) {
+      if (
+        composerCategoryOpen &&
+        composerCategoryScopeRef.current &&
+        !composerCategoryScopeRef.current.contains(e.target as Node)
+      ) {
+        setComposerCategoryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [composerCategoryOpen]);
 
   useEffect(() => {
     async function init() {
@@ -357,6 +400,106 @@ export default function ProfilePage() {
     }
   }
 
+  // ---- Composer logic — writes ONE record to discover_posts + indexes it
+  // into discover_feed_items. This is the single post-creation path for the
+  // whole app; Discover only ever reads from these two tables. ----
+
+  function addComposerImages(files: File[]) {
+    setComposerImages((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function addComposerVideos(files: File[]) {
+    setComposerVideos((prev) => [...prev, ...files].slice(0, MAX_MEDIA_PER_TYPE));
+  }
+  function removeComposerImage(i: number) {
+    setComposerImages((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  function removeComposerVideo(i: number) {
+    setComposerVideos((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  const filteredComposerCategories = POST_CATEGORY_OPTIONS.filter((opt) =>
+    opt.toLowerCase().includes(composerCategory.toLowerCase())
+  );
+
+  async function handleComposerPost() {
+    if (!userId || (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0)) return;
+    setComposerPosting(true);
+    setComposerError(null);
+
+    const image_urls: string[] = [];
+    const video_urls: string[] = [];
+
+    for (const file of composerImages) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("discover-images").upload(path, file);
+      if (upErr) {
+        setComposerError("Image upload failed: " + upErr.message);
+        setComposerPosting(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from("discover-images").getPublicUrl(path);
+      image_urls.push(urlData.publicUrl);
+    }
+    for (const file of composerVideos) {
+      const path = `${userId}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from("discover-videos").upload(path, file);
+      if (upErr) {
+        setComposerError("Video upload failed: " + upErr.message);
+        setComposerPosting(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from("discover-videos").getPublicUrl(path);
+      video_urls.push(urlData.publicUrl);
+    }
+
+    const hashtags = extractHashtags(composerContent);
+    const category = composerCategory.trim() || "Campus Life";
+
+    const { data: inserted, error } = await supabase
+      .from("discover_posts")
+      .insert({
+        user_id: userId,
+        content: composerContent.trim() || null,
+        image_url: image_urls[0] ?? null,
+        video_url: video_urls[0] ?? null,
+        image_urls,
+        video_urls,
+        hashtags,
+        category,
+        visibility: composerVisibility,
+        campus: profile?.campus ?? null,
+      })
+      .select("id, category, visibility, created_at")
+      .single();
+
+    if (error) {
+      setComposerError("Post failed: " + error.message);
+      setComposerPosting(false);
+      return;
+    }
+
+    if (inserted) {
+      const { error: feedErr } = await supabase.from("discover_feed_items").insert({
+        source_type: "discover_post",
+        source_id: inserted.id,
+        user_id: userId,
+        category: inserted.category ?? "Campus Life",
+        visibility: inserted.visibility ?? "public",
+        created_at: inserted.created_at,
+      });
+      if (feedErr) console.error("Feed index insert failed:", feedErr);
+    }
+
+    setComposerContent("");
+    setComposerImages([]);
+    setComposerVideos([]);
+    setComposerCategory("");
+    setComposerVisibility("public");
+    setComposerPosting(false);
+    setPostsCount((c) => c + 1);
+    if (userId) await loadPosts(userId);
+  }
+
   if (loadError) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 bg-hub-bg px-6 text-center">
@@ -538,6 +681,115 @@ export default function ProfilePage() {
             </button>
           ))}
         </div>
+
+        {activeTab === "Posts" && (
+          <div className="mt-4 rounded-xl border border-hub-border bg-hub-card p-3">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 shrink-0 rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+                {profile.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="h-full w-full rounded-full object-cover" />
+                ) : (
+                  fullName.charAt(0).toUpperCase()
+                )}
+              </div>
+              <textarea
+                value={composerContent}
+                onChange={(e) => setComposerContent(e.target.value)}
+                placeholder="What's happening on campus?"
+                rows={2}
+                className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
+              />
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <div ref={composerCategoryScopeRef} className="relative flex-1">
+                <input
+                  value={composerCategory}
+                  onChange={(e) => {
+                    setComposerCategory(e.target.value);
+                    setComposerCategoryOpen(true);
+                  }}
+                  onFocus={() => setComposerCategoryOpen(true)}
+                  placeholder="Category (optional) — e.g. Sports, News..."
+                  className="w-full rounded-lg border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+                />
+                {composerCategoryOpen && filteredComposerCategories.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-40 overflow-y-auto rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                    {filteredComposerCategories.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          setComposerCategory(opt);
+                          setComposerCategoryOpen(false);
+                        }}
+                        className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:text-hub-accentLight"
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <select
+                value={composerVisibility}
+                onChange={(e) => setComposerVisibility(e.target.value as "public" | "campus")}
+                className="shrink-0 rounded-lg border border-hub-border bg-hub-card2 px-2 py-1.5 text-xs text-white outline-none"
+              >
+                <option value="public">Public</option>
+                <option value="campus">Campus only</option>
+              </select>
+            </div>
+
+            <MediaPicker
+              images={composerImages}
+              videos={composerVideos}
+              onAddImages={addComposerImages}
+              onAddVideos={addComposerVideos}
+              onRemoveImage={removeComposerImage}
+              onRemoveVideo={removeComposerVideo}
+              imageInputRef={composerImageInputRef}
+              videoInputRef={composerVideoInputRef}
+            />
+            {composerError && <p className="mt-2 text-xs text-red-400">{composerError}</p>}
+
+            <div className="mt-3 flex items-center justify-between border-t border-hub-border pt-3">
+              <div className="flex items-center gap-5">
+                <button
+                  type="button"
+                  onClick={() => composerImageInputRef.current?.click()}
+                  disabled={composerImages.length >= MAX_MEDIA_PER_TYPE}
+                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+                >
+                  <PhotoIcon /><span>Photo {composerImages.length > 0 ? `(${composerImages.length}/5)` : ""}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => composerVideoInputRef.current?.click()}
+                  disabled={composerVideos.length >= MAX_MEDIA_PER_TYPE}
+                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim disabled:opacity-40"
+                >
+                  <VideoIcon /><span>Video {composerVideos.length > 0 ? `(${composerVideos.length}/5)` : ""}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push("/create-poll")}
+                  className="flex shrink-0 items-center gap-1.5 text-xs text-hub-textDim"
+                >
+                  <PollIcon /><span>Poll</span>
+                </button>
+              </div>
+              <button
+                onClick={handleComposerPost}
+                disabled={composerPosting || (!composerContent.trim() && composerImages.length === 0 && composerVideos.length === 0)}
+                className="shrink-0 rounded-lg bg-hub-accentLight px-4 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+              >
+                {composerPosting ? "Posting..." : "Post"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-3">
@@ -718,6 +970,13 @@ function XIconSmall() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
       <path d="M4 4l16 16M20 4L4 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PollIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M5 20V10M12 20V4M19 20v-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
