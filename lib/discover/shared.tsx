@@ -77,6 +77,7 @@ export const DISCOVER_TABS = [
   { label: "Trending", href: "/discover/trending" },
   { label: "News", href: "/discover/news" },
   { label: "Sports", href: "/discover/sports" },
+  { label: "Videos", href: "/discover/videos" },
   { label: "Clubs", href: "/discover/clubs" },
   { label: "Events", href: "/discover/events" },
   { label: "Marketplace", href: "/discover/marketplace" },
