@@ -18,7 +18,6 @@ import {
   detectCategory,
   linkifyContent,
   timeAgo,
-  reactionSummaryText,
   REACTIONS,
   REACTION_TOP,
   REACTION_BOTTOM,
@@ -104,7 +103,6 @@ function tables(source: Source) {
       };
 }
 
-// Generates object URLs for a list of Files and cleans them up automatically.
 function useFilePreviewUrls(files: File[]): string[] {
   const [urls, setUrls] = useState<string[]>([]);
   useEffect(() => {
@@ -154,7 +152,6 @@ export default function ProfilePage() {
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Auto-pauses any post video that scrolls out of view — same pattern as Discover/Sports.
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     videoObserverRef.current = new IntersectionObserver(
@@ -172,7 +169,6 @@ export default function ProfilePage() {
     if (el) videoObserverRef.current?.observe(el);
   }
 
-  // ---- Composer state ----
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerContent, setComposerContent] = useState("");
   const [composerImages, setComposerImages] = useState<File[]>([]);
@@ -707,7 +703,6 @@ export default function ProfilePage() {
     setComposerVideos((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  // Rotates a selected (not-yet-posted) image 90° clockwise via canvas.
   async function rotateComposerImage(index: number) {
     const file = composerImages[index];
     if (!file) return;
@@ -846,13 +841,23 @@ export default function ProfilePage() {
     const postReactions = reactionsByKey[k] || [];
     const myReaction = postReactions.find((r) => r.user_id === userId)?.type ?? null;
     const activeReactionInfo = REACTIONS.find((r) => r.type === myReaction);
-    const summaryText = reactionSummaryText(postReactions, userId);
     const allComments = commentsByKey[k] || [];
     const topLevel = allComments.filter((c) => !c.parent_id);
     const repliesOf = (id: string) => allComments.filter((c) => c.parent_id === id);
     const currentReply = replyTo[k];
     const isMine = post.user_id === userId;
     const isSaved = post.source === "discover" && bookmarkedIds.has(post.id);
+
+    // top distinct reaction types present, most frequent first, capped at 3 — for the compact icon cluster
+    const typeCounts: Record<string, number> = {};
+    postReactions.forEach((r) => {
+      typeCounts[r.type] = (typeCounts[r.type] || 0) + 1;
+    });
+    const topTypes = Object.entries(typeCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([type]) => REACTIONS.find((r) => r.type === type))
+      .filter(Boolean) as typeof REACTIONS;
 
     return (
       <div key={k} className="relative border-b border-hub-border bg-hub-card px-4 py-3">
@@ -896,9 +901,8 @@ export default function ProfilePage() {
 
         <MediaCarousel images={post.image_urls} videos={post.video_urls} registerVideoRef={registerVideoRef} />
 
-        {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
-
-        <div ref={(el) => { reactionScopeRefs.current[k] = el; }} className="relative mt-2 flex items-center justify-between border-t border-hub-border pt-3">
+        {/* Compact fitting row — reaction cluster+count, comment+count, share, bookmark, evenly spread */}
+        <div ref={(el) => { reactionScopeRefs.current[k] = el; }} className="relative mt-3 flex items-center justify-between border-t border-hub-border pt-3">
           {reactionPickerFor === k && (
             <div className="absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 rounded-2xl border border-hub-border bg-hub-card2 px-4 py-3 shadow-xl">
               <div className="flex items-start gap-4">
@@ -924,19 +928,40 @@ export default function ProfilePage() {
             </div>
           )}
 
-          <div className="flex items-center gap-6">
-            <button onClick={() => setReactionPickerFor((prev) => (prev === k ? null : k))} className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? "text-hub-accentLight" : "text-hub-textDim"}`}>
-              {activeReactionInfo ? (activeReactionInfo.type === "like" ? <ThumbsUpIcon className="text-hub-accentLight" filled /> : <span className="text-base leading-none">{activeReactionInfo.emoji}</span>) : <ThumbsUpIcon className="text-hub-textDim" />}
-              {postReactions.length > 0 && <span>{postReactions.length}</span>}
-            </button>
-            <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
-              <CommentIcon />
-              {allComments.length > 0 && <span>{allComments.length}</span>}
-            </button>
-            <button onClick={() => sharePost(post)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
-              <ShareIcon />
-            </button>
-          </div>
+          <button
+            onClick={() => setReactionPickerFor((prev) => (prev === k ? null : k))}
+            className={`flex items-center gap-1.5 text-xs ${activeReactionInfo ? "text-hub-accentLight" : "text-hub-textDim"}`}
+          >
+            {topTypes.length > 0 ? (
+              <span className="flex items-center">
+                {topTypes.map((r, i) => (
+                  <span
+                    key={r.type}
+                    className={`flex h-5 w-5 items-center justify-center rounded-full border border-hub-card ${r.bg} ${i > 0 ? "-ml-1.5" : ""}`}
+                  >
+                    {r.type === "like" ? (
+                      <ThumbsUpIcon className="text-white" filled small />
+                    ) : (
+                      <span className="text-[10px] leading-none">{r.emoji}</span>
+                    )}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <ThumbsUpIcon className="text-hub-textDim" />
+            )}
+            {postReactions.length > 0 && <span>{postReactions.length}</span>}
+          </button>
+
+          <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+            <CommentIcon />
+            {allComments.length > 0 && <span>{allComments.length}</span>}
+          </button>
+
+          <button onClick={() => sharePost(post)} className="flex items-center gap-1.5 text-xs text-hub-textDim">
+            <ShareIcon />
+          </button>
+
           {post.source === "discover" && (
             <button onClick={() => toggleBookmark(post)} className={`shrink-0 ${isSaved ? "text-hub-accentLight" : "text-hub-textDim"}`}>
               <BookmarkIcon filled={isSaved} />
@@ -1188,7 +1213,6 @@ export default function ProfilePage() {
                   </select>
                 </div>
 
-                {/* Facebook-style tappable thumbnail grid — tap any photo/video to preview, rotate (photos), or remove */}
                 {(composerImages.length > 0 || composerVideos.length > 0) && (
                   <div className="grid grid-cols-4 gap-1.5">
                     {composerImages.map((_, i) => (
@@ -1340,7 +1364,6 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* Composer media preview/edit modal */}
       {mediaEditTarget && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={() => setMediaEditTarget(null)}>
           <div className="flex items-center justify-between p-4">
