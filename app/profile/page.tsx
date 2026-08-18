@@ -12,7 +12,6 @@ import {
   BookmarkIcon,
   PhotoIcon,
   VideoIcon,
-  MediaPicker,
   MediaCarousel,
   MAX_MEDIA_PER_TYPE,
   extractHashtags,
@@ -73,6 +72,8 @@ type UnifiedReply = {
   created_at: string;
 };
 
+type MediaEditTarget = { type: "image" | "video"; index: number };
+
 const tabs = ["Posts", "Replies", "Media", "Saved"] as const;
 type Tab = (typeof tabs)[number];
 
@@ -103,6 +104,20 @@ function tables(source: Source) {
       };
 }
 
+// Generates object URLs for a list of Files and cleans them up automatically.
+function useFilePreviewUrls(files: File[]): string[] {
+  const [urls, setUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const next = files.map((f) => URL.createObjectURL(f));
+    setUrls(next);
+    return () => {
+      next.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
+  return urls;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -123,7 +138,6 @@ export default function ProfilePage() {
   const [saved, setSaved] = useState<UnifiedPost[] | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
 
-  // reactions/comments/bookmarks keyed by "source-id"
   const [reactionsByKey, setReactionsByKey] = useState<Record<string, ReactionRecord[]>>({});
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const [reactingKey, setReactingKey] = useState<string | null>(null);
@@ -140,6 +154,24 @@ export default function ProfilePage() {
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  // Auto-pauses any post video that scrolls out of view — same pattern as Discover/Sports.
+  const videoObserverRef = useRef<IntersectionObserver | null>(null);
+  useEffect(() => {
+    videoObserverRef.current = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const video = entry.target as HTMLVideoElement;
+          if (!entry.isIntersecting || entry.intersectionRatio < 0.5) video.pause();
+        });
+      },
+      { threshold: [0, 0.5, 1] }
+    );
+    return () => videoObserverRef.current?.disconnect();
+  }, []);
+  function registerVideoRef(el: HTMLVideoElement | null) {
+    if (el) videoObserverRef.current?.observe(el);
+  }
+
   // ---- Composer state ----
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [composerContent, setComposerContent] = useState("");
@@ -149,12 +181,15 @@ export default function ProfilePage() {
   const [composerPosting, setComposerPosting] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const [pendingMediaTrigger, setPendingMediaTrigger] = useState<"image" | "video" | null>(null);
+  const [mediaEditTarget, setMediaEditTarget] = useState<MediaEditTarget | null>(null);
+  const [rotating, setRotating] = useState(false);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerVideoInputRef = useRef<HTMLInputElement>(null);
   const composerTextRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fires the pending file picker only after the composer (and its inputs) have
-  // actually mounted — fixes Photo/Video buttons doing nothing on first tap.
+  const composerImagePreviews = useFilePreviewUrls(composerImages);
+  const composerVideoPreviews = useFilePreviewUrls(composerVideos);
+
   useEffect(() => {
     if (composerExpanded && pendingMediaTrigger) {
       if (pendingMediaTrigger === "image") composerImageInputRef.current?.click();
@@ -536,7 +571,7 @@ export default function ProfilePage() {
   }
 
   async function toggleBookmark(post: UnifiedPost) {
-    if (!userId || post.source !== "discover") return; // sports has no bookmarks table yet
+    if (!userId || post.source !== "discover") return;
     const isSaved = bookmarkedIds.has(post.id);
     setBookmarkedIds((prev) => {
       const next = new Set(prev);
@@ -670,6 +705,37 @@ export default function ProfilePage() {
   }
   function removeComposerVideo(i: number) {
     setComposerVideos((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
+  // Rotates a selected (not-yet-posted) image 90° clockwise via canvas.
+  async function rotateComposerImage(index: number) {
+    const file = composerImages[index];
+    if (!file) return;
+    setRotating(true);
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = url;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext("2d");
+      URL.revokeObjectURL(url);
+      if (!ctx) return;
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), file.type || "image/jpeg", 0.92));
+      if (!blob) return;
+      const rotatedFile = new File([blob], file.name, { type: file.type || "image/jpeg" });
+      setComposerImages((prev) => prev.map((f, i) => (i === index ? rotatedFile : f)));
+    } finally {
+      setRotating(false);
+    }
   }
 
   async function handleComposerPost() {
@@ -828,7 +894,7 @@ export default function ProfilePage() {
         {post.text && <p className="mt-2 text-sm text-white/90 whitespace-pre-wrap">{linkifyContent(post.text)}</p>}
         {post.description && <p className="mt-1 text-xs text-hub-textDim whitespace-pre-wrap">{linkifyContent(post.description)}</p>}
 
-        <MediaCarousel images={post.image_urls} videos={post.video_urls} />
+        <MediaCarousel images={post.image_urls} videos={post.video_urls} registerVideoRef={registerVideoRef} />
 
         {summaryText && <p className="mt-3 text-xs text-hub-textDim">{summaryText}</p>}
 
@@ -1122,16 +1188,62 @@ export default function ProfilePage() {
                   </select>
                 </div>
 
-                <MediaPicker
-                  images={composerImages}
-                  videos={composerVideos}
-                  onAddImages={addComposerImages}
-                  onAddVideos={addComposerVideos}
-                  onRemoveImage={removeComposerImage}
-                  onRemoveVideo={removeComposerVideo}
-                  imageInputRef={composerImageInputRef}
-                  videoInputRef={composerVideoInputRef}
+                {/* Facebook-style tappable thumbnail grid — tap any photo/video to preview, rotate (photos), or remove */}
+                {(composerImages.length > 0 || composerVideos.length > 0) && (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {composerImages.map((_, i) => (
+                      <button
+                        key={`img-${i}`}
+                        type="button"
+                        onClick={() => setMediaEditTarget({ type: "image", index: i })}
+                        className="aspect-square overflow-hidden rounded-lg bg-hub-card2"
+                      >
+                        {composerImagePreviews[i] && (
+                          <img src={composerImagePreviews[i]} alt="" className="h-full w-full object-cover" />
+                        )}
+                      </button>
+                    ))}
+                    {composerVideos.map((_, i) => (
+                      <button
+                        key={`vid-${i}`}
+                        type="button"
+                        onClick={() => setMediaEditTarget({ type: "video", index: i })}
+                        className="relative aspect-square overflow-hidden rounded-lg bg-hub-card2"
+                      >
+                        {composerVideoPreviews[i] && (
+                          <video src={composerVideoPreviews[i]} className="h-full w-full object-cover" />
+                        )}
+                        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 text-white">
+                          <VideoIcon />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <input
+                  ref={composerImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) addComposerImages(Array.from(e.target.files));
+                    e.target.value = "";
+                  }}
                 />
+                <input
+                  ref={composerVideoInputRef}
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) addComposerVideos(Array.from(e.target.files));
+                    e.target.value = "";
+                  }}
+                />
+
                 {composerError && <p className="text-xs text-red-400">{composerError}</p>}
 
                 <div className="flex items-center justify-end gap-3 border-t border-hub-border pt-2">
@@ -1227,6 +1339,49 @@ export default function ProfilePage() {
           </>
         )}
       </div>
+
+      {/* Composer media preview/edit modal */}
+      {mediaEditTarget && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/95" onClick={() => setMediaEditTarget(null)}>
+          <div className="flex items-center justify-between p-4">
+            <button onClick={() => setMediaEditTarget(null)} className="text-xl text-white">×</button>
+            {mediaEditTarget.type === "image" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  rotateComposerImage(mediaEditTarget.index);
+                }}
+                disabled={rotating}
+                className="rounded-full bg-white/10 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              >
+                {rotating ? "Rotating..." : "Rotate"}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-1 items-center justify-center px-4" onClick={(e) => e.stopPropagation()}>
+            {mediaEditTarget.type === "image"
+              ? composerImagePreviews[mediaEditTarget.index] && (
+                  <img src={composerImagePreviews[mediaEditTarget.index]} alt="" className="max-h-full max-w-full object-contain" />
+                )
+              : composerVideoPreviews[mediaEditTarget.index] && (
+                  <video src={composerVideoPreviews[mediaEditTarget.index]} controls autoPlay className="max-h-full max-w-full object-contain" />
+                )}
+          </div>
+          <div className="p-4">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (mediaEditTarget.type === "image") removeComposerImage(mediaEditTarget.index);
+                else removeComposerVideo(mediaEditTarget.index);
+                setMediaEditTarget(null);
+              }}
+              className="w-full rounded-lg border border-red-400/40 py-2.5 text-sm font-medium text-red-400"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
 
       <BottomNav />
     </main>
