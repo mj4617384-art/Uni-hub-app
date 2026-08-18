@@ -281,6 +281,10 @@ function MediaLightbox({
   );
 }
 
+// Feed thumbnails now fill edge-to-edge like Facebook/Instagram — object-cover
+// crops overflow instead of letterboxing. Full, uncropped view is still one
+// tap away via the lightbox (which stays object-contain, since a full-screen
+// viewer is exactly where showing the whole file matters).
 export function MediaCarousel({
   images,
   videos,
@@ -298,7 +302,7 @@ export function MediaCarousel({
   return (
     <>
       {items.length === 1 ? (
-        <div className="-mx-4 mt-3 overflow-hidden bg-black" style={{ maxHeight: 480 }}>
+        <div className="-mx-4 mt-3 overflow-hidden bg-black" style={{ height: 400 }}>
           {items[0].type === "image" ? (
             <img
               src={items[0].url}
@@ -306,7 +310,7 @@ export function MediaCarousel({
               loading="lazy"
               onClick={() => setLightboxIndex(0)}
               className="block cursor-zoom-in"
-              style={{ width: "100%", height: "auto", maxHeight: 480, objectFit: "contain", display: "block", margin: "0 auto" }}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           ) : (
             <video
@@ -315,7 +319,7 @@ export function MediaCarousel({
               controls
               preload="metadata"
               className="block"
-              style={{ width: "100%", height: "auto", maxHeight: 480, objectFit: "contain", display: "block", margin: "0 auto" }}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
           )}
         </div>
@@ -325,7 +329,7 @@ export function MediaCarousel({
             <div
               key={i}
               className="relative shrink-0 w-[92%] snap-center overflow-hidden bg-black"
-              style={{ height: 288 }}
+              style={{ height: 350 }}
             >
               {item.type === "image" ? (
                 <img
@@ -334,7 +338,7 @@ export function MediaCarousel({
                   loading="lazy"
                   onClick={() => setLightboxIndex(i)}
                   className="cursor-zoom-in"
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
                 <video
@@ -342,7 +346,7 @@ export function MediaCarousel({
                   src={item.url}
                   controls
                   preload="metadata"
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               )}
               <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white">
