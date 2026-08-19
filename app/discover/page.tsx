@@ -59,9 +59,6 @@ const EXPLORE_CATEGORIES = [
   "Study",
 ];
 
-// These three have real dedicated tables/pages elsewhere in the app —
-// Explore should surface that real data instead of searching discover_posts
-// for a category tag that mostly never gets set for these.
 const EXTERNAL_CATEGORY_TABLES: Record<string, { table: string; route: string; select: string; orderBy: string; ascending: boolean }> = {
   Marketplace: { table: "marketplace_items", route: "/marketplace", select: "id, title, price, image_url, created_at", orderBy: "created_at", ascending: false },
   Events: { table: "events", route: "/events", select: "id, title, start_time, location, created_at", orderBy: "start_time", ascending: true },
@@ -278,8 +275,6 @@ export default function DiscoverPage() {
     setExploreExternalError(null);
     setExploreLoading(true);
 
-    // Marketplace / Events / Study have their own real tables + pages —
-    // surface that real data instead of an almost-always-empty category tag search.
     const externalConfig = EXTERNAL_CATEGORY_TABLES[category];
     if (externalConfig) {
       const { data, error } = await supabase
@@ -294,14 +289,11 @@ export default function DiscoverPage() {
         setExploreLoading(false);
         return;
       }
-      setExploreExternal((data ?? []) as ExternalItem[]);
+      setExploreExternal((data ?? []) as unknown as ExternalItem[]);
       setExploreLoading(false);
       return;
     }
 
-    // Videos = any post/update that actually has a video attached, regardless
-    // of caption text — not just posts whose caption happened to match a
-    // video-related keyword.
     if (category === "Videos") {
       const [discoverRes, sportsRes] = await Promise.all([
         supabase
@@ -334,7 +326,6 @@ export default function DiscoverPage() {
       return;
     }
 
-    // Campus Life / News / Sports / Clubs — tag-based, as before.
     const [discoverRes, sportsRes] = await Promise.all([
       supabase
         .from("discover_posts")
@@ -936,7 +927,6 @@ export default function DiscoverPage() {
             </div>
           )}
 
-          {/* Marketplace / Events / Study — real data from their own tables */}
           {searchResults === null && selectedCategory && isExternalCategory && (
             <div className="mt-4 px-5">
               <p className="pb-2 text-sm font-medium text-hub-textDim">{selectedCategory}</p>
@@ -986,7 +976,6 @@ export default function DiscoverPage() {
             </div>
           )}
 
-          {/* Campus Life / News / Sports / Videos / Clubs — post-based */}
           {searchResults === null && selectedCategory && !isExternalCategory && (
             <div className="mt-4">
               <p className="px-5 pb-2 text-sm font-medium text-hub-textDim">{selectedCategory}</p>
