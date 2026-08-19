@@ -38,6 +38,16 @@ type UnifiedPost = {
   category: string | null;
 };
 
+type ExternalItem = {
+  id: string;
+  title: string | null;
+  description?: string | null;
+  price?: number | null;
+  image_url?: string | null;
+  start_time?: string | null;
+  location?: string | null;
+};
+
 const EXPLORE_CATEGORIES = [
   "Campus Life",
   "News",
@@ -48,6 +58,15 @@ const EXPLORE_CATEGORIES = [
   "Marketplace",
   "Study",
 ];
+
+// These three have real dedicated tables/pages elsewhere in the app —
+// Explore should surface that real data instead of searching discover_posts
+// for a category tag that mostly never gets set for these.
+const EXTERNAL_CATEGORY_TABLES: Record<string, { table: string; route: string; select: string; orderBy: string; ascending: boolean }> = {
+  Marketplace: { table: "marketplace_items", route: "/marketplace", select: "id, title, price, image_url, created_at", orderBy: "created_at", ascending: false },
+  Events: { table: "events", route: "/events", select: "id, title, start_time, location, created_at", orderBy: "start_time", ascending: true },
+  Study: { table: "study_resources", route: "/study-hub", select: "id, title, description, created_at", orderBy: "created_at", ascending: false },
+};
 
 const discoverTabs = ["For You", "Following", "Explore"] as const;
 type DiscoverTab = (typeof discoverTabs)[number];
@@ -117,6 +136,8 @@ export default function DiscoverPage() {
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [explorePosts, setExplorePosts] = useState<UnifiedPost[] | null>(null);
+  const [exploreExternal, setExploreExternal] = useState<ExternalItem[] | null>(null);
+  const [exploreExternalError, setExploreExternalError] = useState<string | null>(null);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UnifiedPost[] | null>(null);
@@ -252,8 +273,68 @@ export default function DiscoverPage() {
     setSelectedCategory(category);
     setSearchResults(null);
     setSearchQuery("");
+    setExplorePosts(null);
+    setExploreExternal(null);
+    setExploreExternalError(null);
     setExploreLoading(true);
 
+    // Marketplace / Events / Study have their own real tables + pages —
+    // surface that real data instead of an almost-always-empty category tag search.
+    const externalConfig = EXTERNAL_CATEGORY_TABLES[category];
+    if (externalConfig) {
+      const { data, error } = await supabase
+        .from(externalConfig.table)
+        .select(externalConfig.select)
+        .order(externalConfig.orderBy, { ascending: externalConfig.ascending })
+        .limit(30);
+
+      if (error) {
+        console.error(error);
+        setExploreExternalError(error.message);
+        setExploreLoading(false);
+        return;
+      }
+      setExploreExternal((data ?? []) as ExternalItem[]);
+      setExploreLoading(false);
+      return;
+    }
+
+    // Videos = any post/update that actually has a video attached, regardless
+    // of caption text — not just posts whose caption happened to match a
+    // video-related keyword.
+    if (category === "Videos") {
+      const [discoverRes, sportsRes] = await Promise.all([
+        supabase
+          .from("discover_posts")
+          .select("id, user_id, content, image_url, video_url, image_urls, video_urls, created_at, category, profiles(first_name, avatar_url)")
+          .order("created_at", { ascending: false })
+          .limit(100),
+        supabase
+          .from("sports_updates")
+          .select("id, user_id, title, description, image_url, image_urls, video_urls, created_at, category, profiles(first_name, avatar_url)")
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+
+      if (discoverRes.error || sportsRes.error) {
+        const msg = discoverRes.error?.message || sportsRes.error?.message || "unknown error";
+        alert("Load videos failed: " + msg);
+        setExploreLoading(false);
+        return;
+      }
+
+      const merged = [...(discoverRes.data ?? []).map(mapDiscoverRow), ...(sportsRes.data ?? []).map(mapSportsRow)]
+        .filter((p) => p.video_urls.length > 0)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 30);
+
+      setExplorePosts(merged);
+      setExploreLoading(false);
+      await loadEngagementFor(merged);
+      return;
+    }
+
+    // Campus Life / News / Sports / Clubs — tag-based, as before.
     const [discoverRes, sportsRes] = await Promise.all([
       supabase
         .from("discover_posts")
@@ -287,6 +368,7 @@ export default function DiscoverPage() {
     }
     setSearching(true);
     setSelectedCategory(null);
+    setExploreExternal(null);
 
     const [discoverRes, sportsRes] = await Promise.all([
       supabase
@@ -755,6 +837,8 @@ export default function DiscoverPage() {
     );
   }
 
+  const isExternalCategory = selectedCategory ? !!EXTERNAL_CATEGORY_TABLES[selectedCategory] : false;
+
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
       <div className="px-5 pt-5">
@@ -852,7 +936,58 @@ export default function DiscoverPage() {
             </div>
           )}
 
-          {searchResults === null && selectedCategory && (
+          {/* Marketplace / Events / Study — real data from their own tables */}
+          {searchResults === null && selectedCategory && isExternalCategory && (
+            <div className="mt-4 px-5">
+              <p className="pb-2 text-sm font-medium text-hub-textDim">{selectedCategory}</p>
+              {exploreLoading && <p className="text-center text-sm text-hub-textDim">Loading...</p>}
+              {exploreExternalError && (
+                <p className="py-4 text-center text-sm text-red-400">Couldn&apos;t load {selectedCategory}: {exploreExternalError}</p>
+              )}
+              {!exploreLoading && !exploreExternalError && exploreExternal && exploreExternal.length === 0 && (
+                <p className="py-6 text-center text-sm text-hub-textDim">Nothing here yet.</p>
+              )}
+              {!exploreLoading &&
+                !exploreExternalError &&
+                (exploreExternal ?? []).map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => router.push(EXTERNAL_CATEGORY_TABLES[selectedCategory].route)}
+                    className="mb-2 flex w-full items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
+                  >
+                    {item.image_url && (
+                      <img src={item.image_url} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white">{item.title}</p>
+                      {selectedCategory === "Marketplace" && item.price != null && (
+                        <p className="text-xs text-hub-accentLight">₦{Number(item.price).toLocaleString()}</p>
+                      )}
+                      {selectedCategory === "Events" && item.start_time && (
+                        <p className="text-xs text-hub-textDim">
+                          {new Date(item.start_time).toLocaleDateString()}
+                          {item.location ? ` · ${item.location}` : ""}
+                        </p>
+                      )}
+                      {selectedCategory === "Study" && item.description && (
+                        <p className="truncate text-xs text-hub-textDim">{item.description}</p>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              {!exploreLoading && !exploreExternalError && (
+                <button
+                  onClick={() => router.push(EXTERNAL_CATEGORY_TABLES[selectedCategory].route)}
+                  className="mt-1 w-full rounded-lg border border-hub-border py-2 text-center text-xs font-medium text-hub-accentLight"
+                >
+                  Open full {selectedCategory} page →
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Campus Life / News / Sports / Videos / Clubs — post-based */}
+          {searchResults === null && selectedCategory && !isExternalCategory && (
             <div className="mt-4">
               <p className="px-5 pb-2 text-sm font-medium text-hub-textDim">{selectedCategory}</p>
               {exploreLoading && <p className="px-5 text-center text-sm text-hub-textDim">Loading...</p>}
