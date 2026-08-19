@@ -13,6 +13,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   themeColor: "#0A0F1E",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -22,6 +23,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" data-theme="dark">
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+      </head>
       <body className="bg-hub-bg min-h-screen antialiased">
         <ThemeProvider>
           <div className="mx-auto max-w-md min-h-screen relative">{children}</div>
