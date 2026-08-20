@@ -49,6 +49,26 @@ const WALLPAPERS: Record<string, { label: string; bg: string; pattern?: string }
     bg: "#140A1E",
     pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='60'%3E%3Cpath d='M0 30 Q30 10 60 30 T120 30' fill='none' stroke='%23a855f7' stroke-width='1.2' opacity='0.12'/%3E%3C/svg%3E")`,
   },
+  "grid-blue": {
+    label: "Grid",
+    bg: "#0A1420",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cpath d='M40 0H0V40' fill='none' stroke='%233b82f6' stroke-width='1' opacity='0.1'/%3E%3C/svg%3E")`,
+  },
+  "hearts-pink": {
+    label: "Hearts",
+    bg: "#1A0A14",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M30 45 Q15 30 15 20 Q15 12 22 12 Q30 12 30 20 Q30 12 38 12 Q45 12 45 20 Q45 30 30 45Z' fill='%23f472b6' opacity='0.12'/%3E%3C/svg%3E")`,
+  },
+  "leaves-green": {
+    label: "Leaves",
+    bg: "#0A1A0F",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cpath d='M40 15 Q55 30 40 60 Q25 30 40 15Z' fill='%2334d399' opacity='0.1'/%3E%3C/svg%3E")`,
+  },
+  "solid-maroon": { label: "Maroon", bg: "#1A0A0F" },
+  "gradient-sunset": {
+    label: "Sunset",
+    bg: "linear-gradient(160deg, #2A0F1E 0%, #1E0A2A 50%, #0A0F2A 100%)",
+  },
 };
 
 function isOnline(lastSeenAt: string | null) {
@@ -159,6 +179,7 @@ export default function ConversationPage() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wallpaperFileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [recording, setRecording] = useState(false);
@@ -172,6 +193,7 @@ export default function ConversationPage() {
 
   const [wallpaper, setWallpaper] = useState("doodle-navy");
   const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
+  const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [callMenuOpen, setCallMenuOpen] = useState(false);
   const [clearingChat, setClearingChat] = useState(false);
@@ -217,9 +239,11 @@ export default function ConversationPage() {
         async (payload) => {
           const m = payload.new as any;
           const sender = participants.find((p) => p.user_id === m.sender_id);
-          setMessages((prev) => [
-            ...prev,
-            {
+          setMessages((prev) => {
+            const tempIndex = prev.findIndex(
+              (msg) => msg.id.startsWith("temp-") && msg.sender_id === m.sender_id && msg.content === m.content
+            );
+            const resolved: Msg = {
               id: m.id,
               sender_id: m.sender_id,
               content: m.content,
@@ -228,8 +252,15 @@ export default function ConversationPage() {
               attachment_size_kb: m.attachment_size_kb,
               created_at: m.created_at,
               senderName: sender ? [sender.first_name, sender.last_name].filter(Boolean).join(" ") || "Student" : "Student",
-            },
-          ]);
+            };
+            if (tempIndex !== -1) {
+              const next = [...prev];
+              next[tempIndex] = resolved;
+              return next;
+            }
+            if (prev.some((msg) => msg.id === m.id)) return prev;
+            return [...prev, resolved];
+          });
           if (userId) await markRead(userId);
           setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 50);
         }
@@ -353,13 +384,31 @@ export default function ConversationPage() {
 
   async function sendMessage() {
     if (!userId || !draft.trim()) return;
-    setSending(true);
     const text = draft.trim();
     setDraft("");
+    const tempId = `temp-${Date.now()}`;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        sender_id: userId,
+        content: text,
+        attachment_url: null,
+        attachment_name: null,
+        attachment_size_kb: null,
+        created_at: new Date().toISOString(),
+        senderName: "You",
+      },
+    ]);
+    setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 50);
+
+    setSending(true);
     const { error } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: userId, content: text });
     setSending(false);
     if (error) {
       alert("Send failed: " + error.message);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setDraft(text);
     }
   }
@@ -486,6 +535,23 @@ export default function ConversationPage() {
     await supabase.from("conversations").update({ wallpaper: key }).eq("id", conversationId);
   }
 
+  async function uploadWallpaper(file: File) {
+    setUploadingWallpaper(true);
+    const path = `${conversationId}/wallpaper-${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("chat-wallpapers").upload(path, file);
+    if (upErr) {
+      alert("Wallpaper upload failed: " + upErr.message);
+      setUploadingWallpaper(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("chat-wallpapers").getPublicUrl(path);
+    const value = `custom:${urlData.publicUrl}`;
+    setWallpaper(value);
+    setUploadingWallpaper(false);
+    setWallpaperPickerOpen(false);
+    await supabase.from("conversations").update({ wallpaper: value }).eq("id", conversationId);
+  }
+
   async function clearChat() {
     if (!window.confirm("Clear all messages in this chat? This can't be undone.")) return;
     setClearingChat(true);
@@ -508,6 +574,8 @@ export default function ConversationPage() {
   }
 
   const onlineCount = convType === "group" ? participants.filter((p) => isOnline(p.last_seen_at)).length : 0;
+  const isCustomWallpaper = wallpaper.startsWith("custom:");
+  const customWallpaperUrl = isCustomWallpaper ? wallpaper.slice(7) : null;
 
   let lastDay = "";
 
@@ -619,12 +687,22 @@ export default function ConversationPage() {
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-4"
-        style={{
-          backgroundColor: WALLPAPERS[wallpaper]?.bg || "#0A0F1E",
-          backgroundImage: WALLPAPERS[wallpaper]?.pattern || "none",
-          backgroundRepeat: "repeat",
-          backgroundSize: "200px 200px",
-        }}
+        style={
+          isCustomWallpaper
+            ? {
+                backgroundImage: `url("${customWallpaperUrl}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+              }
+            : {
+                backgroundColor: WALLPAPERS[wallpaper]?.bg?.startsWith("#") ? WALLPAPERS[wallpaper].bg : "#0A0F1E",
+                background: WALLPAPERS[wallpaper]?.bg?.startsWith("linear-gradient") ? WALLPAPERS[wallpaper].bg : undefined,
+                backgroundImage: WALLPAPERS[wallpaper]?.pattern || "none",
+                backgroundRepeat: "repeat",
+                backgroundSize: "200px 200px",
+              }
+        }
       >
         {messages.map((m) => {
           const showDay = dayLabel(m.created_at) !== lastDay;
@@ -824,15 +902,39 @@ export default function ConversationPage() {
 
       {wallpaperPickerOpen && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setWallpaperPickerOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
+          <div onClick={(e) => e.stopPropagation()} className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
             <p className="mb-3 text-sm font-semibold text-white">Chat wallpaper</p>
+
+            <input
+              ref={wallpaperFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) uploadWallpaper(e.target.files[0]);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => wallpaperFileInputRef.current?.click()}
+              disabled={uploadingWallpaper}
+              className="mb-3 w-full rounded-lg border border-hub-border py-2.5 text-center text-sm font-medium text-hub-accentLight disabled:opacity-50"
+            >
+              {uploadingWallpaper ? "Uploading..." : "Upload photo from gallery"}
+            </button>
+
             <div className="grid grid-cols-2 gap-3">
               {Object.entries(WALLPAPERS).map(([key, w]) => (
                 <button
                   key={key}
                   onClick={() => changeWallpaper(key)}
                   className={`h-20 rounded-xl border-2 ${wallpaper === key ? "border-hub-accentLight" : "border-hub-border"}`}
-                  style={{ backgroundColor: w.bg, backgroundImage: w.pattern || "none", backgroundSize: "60px 60px" }}
+                  style={{
+                    backgroundColor: w.bg.startsWith("#") ? w.bg : undefined,
+                    background: w.bg.startsWith("linear-gradient") ? w.bg : undefined,
+                    backgroundImage: w.pattern || "none",
+                    backgroundSize: "60px 60px",
+                  }}
                 >
                   <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] text-white">{w.label}</span>
                 </button>
