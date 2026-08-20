@@ -961,7 +961,6 @@ export default function DiscoverPage() {
 
   function renderPersonRow(person: Person) {
     const isFollowing = followingIds.has(person.id);
-    const isMutual = isFollowing && followerIds.has(person.id);
     return (
       <div key={person.id} className="flex items-center gap-3 border-b border-hub-border px-5 py-3">
         <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-sm font-medium text-white">
@@ -976,15 +975,13 @@ export default function DiscoverPage() {
           {person.bio && <p className="truncate text-xs text-hub-textDim">{person.bio}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {isMutual && (
-            <button
-              onClick={() => handleMessage(person.id)}
-              disabled={messageBusyId === person.id}
-              className="rounded-full border border-hub-border px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-            >
-              {messageBusyId === person.id ? "..." : "Message"}
-            </button>
-          )}
+          <button
+            onClick={() => handleMessage(person.id)}
+            disabled={messageBusyId === person.id}
+            className="rounded-full border border-hub-border px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+          >
+            {messageBusyId === person.id ? "..." : "Message"}
+          </button>
           <button
             onClick={() => toggleFollow(person.id)}
             disabled={followBusyId === person.id}
