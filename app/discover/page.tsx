@@ -49,6 +49,13 @@ type ExternalItem = {
   location?: string | null;
 };
 
+type Person = {
+  id: string;
+  first_name: string | null;
+  avatar_url: string | null;
+  bio: string | null;
+};
+
 const EXPLORE_CATEGORIES = [
   "Campus Life",
   "News",
@@ -68,6 +75,8 @@ const EXTERNAL_CATEGORY_TABLES: Record<string, { table: string; route: string; s
 
 const discoverTabs = ["For You", "Following", "Explore"] as const;
 type DiscoverTab = (typeof discoverTabs)[number];
+
+const PEOPLE_PAGE_SIZE = 10;
 
 function keyFor(source: Source, id: string) {
   return `${source}-${id}`;
@@ -157,6 +166,19 @@ export default function DiscoverPage() {
   const reactionScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const menuScopeRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  // --- Following tab state ---
+  const [followingLoaded, setFollowingLoaded] = useState(false);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
+  const [followerIds, setFollowerIds] = useState<Set<string>>(new Set());
+  const [followingFeed, setFollowingFeed] = useState<UnifiedPost[] | null>(null);
+  const [followingFeedLoading, setFollowingFeedLoading] = useState(false);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [peopleOffset, setPeopleOffset] = useState(0);
+  const [peopleHasMore, setPeopleHasMore] = useState(true);
+  const [peopleLoading, setPeopleLoading] = useState(false);
+  const [followBusyId, setFollowBusyId] = useState<string | null>(null);
+  const [messageBusyId, setMessageBusyId] = useState<string | null>(null);
+
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     videoObserverRef.current = new IntersectionObserver(
@@ -218,6 +240,12 @@ export default function DiscoverPage() {
     init();
   }, [router]);
 
+  useEffect(() => {
+    if (activeTab === "Following" && userId && !followingLoaded) {
+      loadFollowData();
+    }
+  }, [activeTab, userId, followingLoaded]);
+
   async function loadForYou() {
     setForYouLoading(true);
     const { data: feedItems, error: feedErr } = await supabase
@@ -265,6 +293,115 @@ export default function DiscoverPage() {
     setForYouPosts(ordered);
     setForYouLoading(false);
     await loadEngagementFor(ordered);
+  }
+
+  // --- Following tab logic ---
+  async function loadFollowData() {
+    if (!userId) return;
+    setFollowingLoaded(true);
+
+    const [{ data: myFollows }, { data: myFollowers }] = await Promise.all([
+      supabase.from("follows").select("following_id").eq("follower_id", userId),
+      supabase.from("follows").select("follower_id").eq("following_id", userId),
+    ]);
+
+    const followingSet = new Set((myFollows ?? []).map((r: any) => r.following_id));
+    const followerSet = new Set((myFollowers ?? []).map((r: any) => r.follower_id));
+    setFollowingIds(followingSet);
+    setFollowerIds(followerSet);
+
+    await loadPeople(true);
+    if (followingSet.size > 0) await loadFollowingFeed(followingSet);
+    else setFollowingFeed([]);
+  }
+
+  async function loadFollowingFeed(ids: Set<string>) {
+    setFollowingFeedLoading(true);
+    const idList = Array.from(ids);
+    const [discoverRes, sportsRes] = await Promise.all([
+      supabase
+        .from("discover_posts")
+        .select("id, user_id, content, image_url, video_url, image_urls, video_urls, created_at, category, profiles(first_name, avatar_url)")
+        .in("user_id", idList)
+        .order("created_at", { ascending: false })
+        .limit(30),
+      supabase
+        .from("sports_updates")
+        .select("id, user_id, title, description, image_url, image_urls, video_urls, created_at, category, profiles(first_name, avatar_url)")
+        .in("user_id", idList)
+        .order("created_at", { ascending: false })
+        .limit(30),
+    ]);
+
+    const merged = [
+      ...(discoverRes.data ?? []).map(mapDiscoverRow),
+      ...(sportsRes.data ?? []).map(mapSportsRow),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    setFollowingFeed(merged);
+    setFollowingFeedLoading(false);
+    await loadEngagementFor(merged);
+  }
+
+  async function loadPeople(reset = false) {
+    if (!userId) return;
+    setPeopleLoading(true);
+    const offset = reset ? 0 : peopleOffset;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, first_name, avatar_url, bio")
+      .neq("id", userId)
+      .order("first_name", { ascending: true })
+      .range(offset, offset + PEOPLE_PAGE_SIZE - 1);
+
+    if (error) {
+      console.error(error);
+      setPeopleLoading(false);
+      return;
+    }
+
+    const rows = data ?? [];
+    setPeople((prev) => (reset ? rows : [...prev, ...rows]));
+    setPeopleOffset(offset + rows.length);
+    setPeopleHasMore(rows.length === PEOPLE_PAGE_SIZE);
+    setPeopleLoading(false);
+  }
+
+  async function toggleFollow(personId: string) {
+    if (!userId) return;
+    setFollowBusyId(personId);
+    const isFollowing = followingIds.has(personId);
+
+    if (isFollowing) {
+      const { error } = await supabase.from("follows").delete().eq("follower_id", userId).eq("following_id", personId);
+      if (!error) {
+        const next = new Set(followingIds);
+        next.delete(personId);
+        setFollowingIds(next);
+        await loadFollowingFeed(next);
+      }
+    } else {
+      const { error } = await supabase.from("follows").insert({ follower_id: userId, following_id: personId });
+      if (!error) {
+        const next = new Set(followingIds);
+        next.add(personId);
+        setFollowingIds(next);
+        await loadFollowingFeed(next);
+      }
+    }
+    setFollowBusyId(null);
+  }
+
+  async function handleMessage(personId: string) {
+    setMessageBusyId(personId);
+    const { data, error } = await supabase.rpc("start_conversation", { other_user_id: personId });
+    setMessageBusyId(null);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    router.push(`/messages/${data}`);
   }
 
   async function loadCategory(category: string) {
@@ -613,6 +750,7 @@ export default function DiscoverPage() {
     setForYouPosts((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
     setExplorePosts((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
     setSearchResults((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
+    setFollowingFeed((prev) => (prev ? prev.filter((p) => !(p.source === post.source && p.id === post.id)) : prev));
   }
 
   async function handleDeletePost(post: UnifiedPost) {
@@ -821,6 +959,46 @@ export default function DiscoverPage() {
     );
   }
 
+  function renderPersonRow(person: Person) {
+    const isFollowing = followingIds.has(person.id);
+    const isMutual = isFollowing && followerIds.has(person.id);
+    return (
+      <div key={person.id} className="flex items-center gap-3 border-b border-hub-border px-5 py-3">
+        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-sm font-medium text-white">
+          {person.avatar_url ? (
+            <img src={person.avatar_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            (person.first_name || "S").charAt(0).toUpperCase()
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-white">{person.first_name || "Student"}</p>
+          {person.bio && <p className="truncate text-xs text-hub-textDim">{person.bio}</p>}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {isMutual && (
+            <button
+              onClick={() => handleMessage(person.id)}
+              disabled={messageBusyId === person.id}
+              className="rounded-full border border-hub-border px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            >
+              {messageBusyId === person.id ? "..." : "Message"}
+            </button>
+          )}
+          <button
+            onClick={() => toggleFollow(person.id)}
+            disabled={followBusyId === person.id}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium disabled:opacity-40 ${
+              isFollowing ? "border border-hub-border text-white" : "bg-hub-accentLight text-white"
+            }`}
+          >
+            {followBusyId === person.id ? "..." : isFollowing ? "Following" : "Follow"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-hub-bg">
@@ -878,9 +1056,47 @@ export default function DiscoverPage() {
       )}
 
       {activeTab === "Following" && (
-        <div className="px-5 py-10 text-center">
-          <p className="text-sm text-white/90">You&apos;re not following anyone yet</p>
-          <p className="mt-1 text-xs text-hub-textDim">Posts from people you follow will show up here once following is available.</p>
+        <div className="mt-3">
+          {followingFeedLoading && <p className="px-5 text-center text-sm text-hub-textDim">Loading...</p>}
+
+          {!followingFeedLoading && followingIds.size === 0 && (
+            <div className="px-5 py-6 text-center">
+              <p className="text-sm text-white/90">You&apos;re not following anyone yet</p>
+              <p className="mt-1 text-xs text-hub-textDim">Follow people below to see their posts here.</p>
+            </div>
+          )}
+
+          {!followingFeedLoading && followingIds.size > 0 && followingFeed && followingFeed.length === 0 && (
+            <p className="px-5 py-6 text-center text-sm text-hub-textDim">
+              No posts yet from people you follow.
+            </p>
+          )}
+
+          {!followingFeedLoading && (followingFeed ?? []).map(renderPostCard)}
+
+          <div className="mt-4 border-t border-hub-border px-5 pt-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-white">Following</p>
+              <span className="rounded-full bg-hub-card2 px-2 py-0.5 text-xs text-hub-textDim">{followingIds.size}</span>
+            </div>
+            <p className="mt-1 text-xs text-hub-textDim">Posts from people you follow will show up above.</p>
+          </div>
+
+          <div className="mt-2">
+            {people.map(renderPersonRow)}
+          </div>
+
+          {peopleHasMore && (
+            <div className="px-5 py-4">
+              <button
+                onClick={() => loadPeople(false)}
+                disabled={peopleLoading}
+                className="w-full rounded-full border border-hub-border py-2 text-center text-xs font-medium text-hub-accentLight disabled:opacity-40"
+              >
+                {peopleLoading ? "Loading..." : "Load more"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
