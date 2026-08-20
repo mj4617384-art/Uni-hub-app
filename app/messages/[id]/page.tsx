@@ -149,6 +149,23 @@ export default function ConversationPage() {
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const [viewportHeight, setViewportHeight] = useState<string>("100dvh");
+
+  useEffect(() => {
+    function updateHeight() {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+      }
+    }
+    updateHeight();
+    window.visualViewport?.addEventListener("resize", updateHeight);
+    window.visualViewport?.addEventListener("scroll", updateHeight);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateHeight);
+      window.visualViewport?.removeEventListener("scroll", updateHeight);
+    };
+  }, []);
+
   useEffect(() => {
     async function init() {
       const { data } = await supabase.auth.getUser();
@@ -450,7 +467,7 @@ export default function ConversationPage() {
   let lastDay = "";
 
   return (
-    <main className="flex h-screen flex-col bg-hub-bg">
+    <main className="flex flex-col bg-hub-bg" style={{ height: viewportHeight }}>
       <div className="flex items-center gap-3 border-b border-hub-border px-4 py-3">
         <button onClick={() => router.push("/messages")} className="text-white">
           <BackIcon />
@@ -492,7 +509,16 @@ export default function ConversationPage() {
         </button>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-4"
+        style={{
+          backgroundColor: "#0A0F1E",
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='1.2' opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='10'/%3E%3Cpath d='M100 20 L100 45 M88 32 L112 32'/%3E%3Crect x='150' y='140' width='20' height='16' rx='2'/%3E%3Ccircle cx='60' cy='150' r='6'/%3E%3Cpath d='M20 160 Q30 150 40 160 Q50 170 60 160'/%3E%3Ctext x='140' y='60' font-size='18' fill='%23ffffff' stroke='none' opacity='0.7'%3E%CF%80%3C/text%3E%3C/g%3E%3C/svg%3E")`,
+          backgroundRepeat: "repeat",
+          backgroundSize: "200px 200px",
+        }}
+      >
         {messages.map((m) => {
           const showDay = dayLabel(m.created_at) !== lastDay;
           lastDay = dayLabel(m.created_at);
