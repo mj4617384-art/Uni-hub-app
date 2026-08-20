@@ -32,6 +32,25 @@ const EMOJI_GRID = [
   "😤", "🤩", "😱", "🫡", "🙏🏾", "💪", "🎓", "📚", "☕", "🏆", "🎯", "🚀",
 ];
 
+const WALLPAPERS: Record<string, { label: string; bg: string; pattern?: string }> = {
+  "doodle-navy": {
+    label: "Campus Doodle",
+    bg: "#0A0F1E",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='1.2' opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='10'/%3E%3Cpath d='M100 20 L100 45 M88 32 L112 32'/%3E%3Crect x='150' y='140' width='20' height='16' rx='2'/%3E%3Ccircle cx='60' cy='150' r='6'/%3E%3Cpath d='M20 160 Q30 150 40 160 Q50 170 60 160'/%3E%3Ctext x='140' y='60' font-size='18' fill='%23ffffff' stroke='none' opacity='0.7'%3E%CF%80%3C/text%3E%3C/g%3E%3C/svg%3E")`,
+  },
+  "dots-teal": {
+    label: "Dotted",
+    bg: "#0A1A18",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='4' cy='4' r='1.6' fill='%2334d399' opacity='0.15'/%3E%3C/svg%3E")`,
+  },
+  "solid-dark": { label: "Plain Dark", bg: "#0A0F1E" },
+  "waves-purple": {
+    label: "Waves",
+    bg: "#140A1E",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='60'%3E%3Cpath d='M0 30 Q30 10 60 30 T120 30' fill='none' stroke='%23a855f7' stroke-width='1.2' opacity='0.12'/%3E%3C/svg%3E")`,
+  },
+};
+
 function isOnline(lastSeenAt: string | null) {
   if (!lastSeenAt) return false;
   return Date.now() - new Date(lastSeenAt).getTime() < 2 * 60 * 1000;
@@ -151,6 +170,12 @@ export default function ConversationPage() {
 
   const [viewportHeight, setViewportHeight] = useState<string>("100dvh");
 
+  const [wallpaper, setWallpaper] = useState("doodle-navy");
+  const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [callMenuOpen, setCallMenuOpen] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
+
   useEffect(() => {
     function updateHeight() {
       if (window.visualViewport) {
@@ -234,7 +259,7 @@ export default function ConversationPage() {
   async function loadConversation(uid: string) {
     const { data: conv, error } = await supabase
       .from("conversations")
-      .select("id, type, name, avatar_url, announcement")
+      .select("id, type, name, avatar_url, announcement, wallpaper")
       .eq("id", conversationId)
       .single();
 
@@ -246,6 +271,7 @@ export default function ConversationPage() {
 
     setConvType(conv.type);
     setAnnouncement(conv.announcement);
+    setWallpaper(conv.wallpaper || "doodle-navy");
 
     const { data: parts, error: partsErr } = await supabase
       .from("conversation_participants")
@@ -454,6 +480,25 @@ export default function ConversationPage() {
     return allRead ? "read" : "sent";
   }
 
+  async function changeWallpaper(key: string) {
+    setWallpaper(key);
+    setWallpaperPickerOpen(false);
+    await supabase.from("conversations").update({ wallpaper: key }).eq("id", conversationId);
+  }
+
+  async function clearChat() {
+    if (!window.confirm("Clear all messages in this chat? This can't be undone.")) return;
+    setClearingChat(true);
+    const { error } = await supabase.from("messages").delete().eq("conversation_id", conversationId);
+    setClearingChat(false);
+    setHeaderMenuOpen(false);
+    if (error) {
+      alert("Clear chat failed: " + error.message);
+      return;
+    }
+    setMessages([]);
+  }
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-hub-bg">
@@ -490,12 +535,74 @@ export default function ConversationPage() {
               : "Offline"}
           </p>
         </div>
-        <button onClick={() => alert("Voice and video calling are coming in a future update.")} className="text-hub-textDim">
-          <PhoneIcon />
-        </button>
+
+        <div className="relative">
+          <button onClick={() => setCallMenuOpen((v) => !v)} className="text-hub-textDim">
+            <PhoneIcon />
+          </button>
+          {callMenuOpen && (
+            <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setCallMenuOpen(false);
+                  alert("Voice calling is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Voice call
+              </button>
+              <button
+                onClick={() => {
+                  setCallMenuOpen(false);
+                  alert("Video calling is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Video call
+              </button>
+            </div>
+          )}
+        </div>
+
         <button onClick={() => setInfoOpen(true)} className="text-hub-textDim">
           <InfoIcon />
         </button>
+
+        <div className="relative">
+          <button onClick={() => setHeaderMenuOpen((v) => !v)} className="text-hub-textDim">
+            <MoreDotsIcon />
+          </button>
+          {headerMenuOpen && (
+            <div className="absolute right-0 top-9 z-30 w-52 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  setWallpaperPickerOpen(true);
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Chat theme
+              </button>
+              <button
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  alert("Media, links and docs view is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Media, links and docs
+              </button>
+              <div className="my-1 border-t border-hub-border" />
+              <button
+                onClick={clearChat}
+                disabled={clearingChat}
+                className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40"
+              >
+                {clearingChat ? "Clearing..." : "Clear chat"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {announcement && (
@@ -513,8 +620,8 @@ export default function ConversationPage() {
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-4"
         style={{
-          backgroundColor: "#0A0F1E",
-          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='1.2' opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='10'/%3E%3Cpath d='M100 20 L100 45 M88 32 L112 32'/%3E%3Crect x='150' y='140' width='20' height='16' rx='2'/%3E%3Ccircle cx='60' cy='150' r='6'/%3E%3Cpath d='M20 160 Q30 150 40 160 Q50 170 60 160'/%3E%3Ctext x='140' y='60' font-size='18' fill='%23ffffff' stroke='none' opacity='0.7'%3E%CF%80%3C/text%3E%3C/g%3E%3C/svg%3E")`,
+          backgroundColor: WALLPAPERS[wallpaper]?.bg || "#0A0F1E",
+          backgroundImage: WALLPAPERS[wallpaper]?.pattern || "none",
           backgroundRepeat: "repeat",
           backgroundSize: "200px 200px",
         }}
@@ -689,7 +796,16 @@ export default function ConversationPage() {
         <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setInfoOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
             <p className="text-sm font-semibold text-white">{convType === "group" ? "Members" : "About"}</p>
-            <div className="mt-3 flex flex-col gap-3">
+            <button
+              onClick={() => {
+                setInfoOpen(false);
+                setWallpaperPickerOpen(true);
+              }}
+              className="mt-3 w-full rounded-lg border border-hub-border py-2 text-center text-sm text-hub-accentLight"
+            >
+              Change wallpaper
+            </button>
+            <div className="mt-4 flex flex-col gap-3">
               {participants.map((p) => (
                 <div key={p.user_id} className="flex items-center gap-3">
                   <div className="relative h-9 w-9 shrink-0">
@@ -700,6 +816,26 @@ export default function ConversationPage() {
                   </div>
                   <p className="text-sm text-white">{[p.first_name, p.last_name].filter(Boolean).join(" ") || "Student"}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {wallpaperPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setWallpaperPickerOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
+            <p className="mb-3 text-sm font-semibold text-white">Chat wallpaper</p>
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(WALLPAPERS).map(([key, w]) => (
+                <button
+                  key={key}
+                  onClick={() => changeWallpaper(key)}
+                  className={`h-20 rounded-xl border-2 ${wallpaper === key ? "border-hub-accentLight" : "border-hub-border"}`}
+                  style={{ backgroundColor: w.bg, backgroundImage: w.pattern || "none", backgroundSize: "60px 60px" }}
+                >
+                  <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] text-white">{w.label}</span>
+                </button>
               ))}
             </div>
           </div>
@@ -728,6 +864,15 @@ function InfoIcon() {
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
       <path d="M12 11v6M12 8v.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MoreDotsIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="5" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="19" cy="12" r="1.8" />
     </svg>
   );
 }
