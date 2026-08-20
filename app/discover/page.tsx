@@ -41,10 +41,11 @@ type UnifiedPost = {
 type ExternalItem = {
   id: string;
   title: string | null;
-  description?: string | null;
+  subject?: string | null;
   price?: number | null;
-  image_url?: string | null;
-  start_time?: string | null;
+  image_urls?: string[] | null;
+  event_date?: string | null;
+  event_time?: string | null;
   location?: string | null;
 };
 
@@ -60,9 +61,9 @@ const EXPLORE_CATEGORIES = [
 ];
 
 const EXTERNAL_CATEGORY_TABLES: Record<string, { table: string; route: string; select: string; orderBy: string; ascending: boolean }> = {
-  Marketplace: { table: "marketplace_items", route: "/marketplace", select: "id, title, price, image_url, created_at", orderBy: "created_at", ascending: false },
-  Events: { table: "events", route: "/events", select: "id, title, start_time, location, created_at", orderBy: "start_time", ascending: true },
-  Study: { table: "study_resources", route: "/study-hub", select: "id, title, description, created_at", orderBy: "created_at", ascending: false },
+  Marketplace: { table: "marketplace_items", route: "/marketplace", select: "id, title, price, image_urls, created_at", orderBy: "created_at", ascending: false },
+  Events: { table: "events", route: "/events", select: "id, title, event_date, event_time, location, created_at", orderBy: "event_date", ascending: true },
+  Study: { table: "study_resources", route: "/study-hub", select: "id, title, subject, category, created_at", orderBy: "created_at", ascending: false },
 };
 
 const discoverTabs = ["For You", "Following", "Explore"] as const;
@@ -945,22 +946,23 @@ export default function DiscoverPage() {
                     onClick={() => router.push(EXTERNAL_CATEGORY_TABLES[selectedCategory].route)}
                     className="mb-2 flex w-full items-center gap-3 rounded-xl border border-hub-border bg-hub-card p-3 text-left"
                   >
-                    {item.image_url && (
-                      <img src={item.image_url} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                    {item.image_urls && item.image_urls[0] && (
+                      <img src={item.image_urls[0]} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-white">{item.title}</p>
                       {selectedCategory === "Marketplace" && item.price != null && (
                         <p className="text-xs text-hub-accentLight">₦{Number(item.price).toLocaleString()}</p>
                       )}
-                      {selectedCategory === "Events" && item.start_time && (
+                      {selectedCategory === "Events" && item.event_date && (
                         <p className="text-xs text-hub-textDim">
-                          {new Date(item.start_time).toLocaleDateString()}
+                          {new Date(item.event_date).toLocaleDateString()}
+                          {item.event_time ? ` · ${item.event_time}` : ""}
                           {item.location ? ` · ${item.location}` : ""}
                         </p>
                       )}
-                      {selectedCategory === "Study" && item.description && (
-                        <p className="truncate text-xs text-hub-textDim">{item.description}</p>
+                      {selectedCategory === "Study" && item.subject && (
+                        <p className="truncate text-xs text-hub-textDim">{item.subject}</p>
                       )}
                     </div>
                   </button>
