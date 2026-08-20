@@ -21,9 +21,16 @@ type Participant = {
   last_name: string | null;
   avatar_url: string | null;
   last_seen_at: string | null;
+  last_read_at: string | null;
 };
 
 const REACTION_SET = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"];
+const EMOJI_GRID = [
+  "😀", "😂", "🥰", "😍", "😎", "🤔", "😢", "😡", "👍", "👎", "🙏", "🔥",
+  "🎉", "❤️", "💯", "👏", "🙌", "😴", "🤯", "😭", "🥳", "🤝", "✅", "❌",
+  "⚡", "⭐", "💀", "👀", "🤗", "😅", "😇", "🤣", "😜", "🙄", "😬", "🥺",
+  "😤", "🤩", "😱", "🫡", "🙏🏾", "💪", "🎓", "📚", "☕", "🏆", "🎯", "🚀",
+];
 
 function isOnline(lastSeenAt: string | null) {
   if (!lastSeenAt) return false;
@@ -44,11 +51,69 @@ function timeShort(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+function formatDuration(s: number) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+function isAudioAttachment(name: string | null) {
+  return !!name && /\.(webm|mp3|m4a|wav|ogg)$/i.test(name);
+}
+
 const NAME_COLORS = ["text-hub-accentLight", "text-emerald-400", "text-pink-400", "text-orange-400", "text-purple-400", "text-cyan-400"];
 function colorForSender(id: string) {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
   return NAME_COLORS[Math.abs(hash) % NAME_COLORS.length];
+}
+
+function VoiceNotePlayer({ url, isMine }: { url: string; isMine: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [current, setCurrent] = useState(0);
+
+  function toggle() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) audio.pause();
+    else audio.play();
+  }
+
+  const progress = duration > 0 ? (current / duration) * 100 : 0;
+
+  return (
+    <div className="flex min-w-[190px] items-center gap-2">
+      <button
+        onClick={toggle}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${isMine ? "bg-white/20" : "bg-hub-accentLight"}`}
+      >
+        {playing ? <PauseIcon /> : <PlayIcon />}
+      </button>
+      <div className="flex-1">
+        <div className="h-1 w-full rounded-full bg-white/25">
+          <div className="h-1 rounded-full bg-white" style={{ width: `${progress}%` }} />
+        </div>
+        <p className="mt-1 text-[10px] opacity-80">
+          {formatDuration(current)} / {formatDuration(duration || 0)}
+        </p>
+      </div>
+      <audio
+        ref={audioRef}
+        src={url}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrent(0);
+        }}
+        className="hidden"
+      />
+    </div>
+  );
 }
 
 export default function ConversationPage() {
@@ -73,8 +138,16 @@ export default function ConversationPage() {
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -119,6 +192,13 @@ export default function ConversationPage() {
           setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 50);
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "conversation_participants", filter: `conversation_id=eq.${conversationId}` },
+        () => {
+          if (userId) loadConversation(userId);
+        }
+      )
       .subscribe();
 
     return () => {
@@ -126,6 +206,13 @@ export default function ConversationPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, participants, userId]);
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    };
+  }, []);
 
   async function loadConversation(uid: string) {
     const { data: conv, error } = await supabase
@@ -145,7 +232,7 @@ export default function ConversationPage() {
 
     const { data: parts, error: partsErr } = await supabase
       .from("conversation_participants")
-      .select("user_id, profiles(first_name, last_name, avatar_url, last_seen_at)")
+      .select("user_id, last_read_at, profiles(first_name, last_name, avatar_url, last_seen_at)")
       .eq("conversation_id", conversationId);
 
     if (partsErr) {
@@ -159,6 +246,7 @@ export default function ConversationPage() {
       last_name: p.profiles?.last_name ?? null,
       avatar_url: p.profiles?.avatar_url ?? null,
       last_seen_at: p.profiles?.last_seen_at ?? null,
+      last_read_at: p.last_read_at ?? null,
     }));
     setParticipants(mappedParts);
 
@@ -255,6 +343,71 @@ export default function ConversationPage() {
     if (error) alert("Send failed: " + error.message);
   }
 
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+    } catch {
+      alert("Couldn't access your microphone. Check site permissions and try again.");
+    }
+  }
+
+  function stopRecordingAndDiscard() {
+    mediaRecorderRef.current?.stop();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    setRecording(false);
+    audioChunksRef.current = [];
+  }
+
+  async function stopRecordingAndSend() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || !userId) return;
+
+    const stopped = new Promise<Blob>((resolve) => {
+      recorder.onstop = () => {
+        resolve(new Blob(audioChunksRef.current, { type: "audio/webm" }));
+      };
+    });
+    recorder.stop();
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    setRecording(false);
+
+    const blob = await stopped;
+    if (blob.size === 0) return;
+
+    setAttaching(true);
+    const fileName = `voice-${Date.now()}.webm`;
+    const path = `${conversationId}/${fileName}`;
+    const { error: upErr } = await supabase.storage.from("message-attachments").upload(path, blob, { contentType: "audio/webm" });
+    if (upErr) {
+      alert("Voice note upload failed: " + upErr.message);
+      setAttaching(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("message-attachments").getPublicUrl(path);
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      sender_id: userId,
+      attachment_url: urlData.publicUrl,
+      attachment_name: fileName,
+      attachment_size_kb: Math.round(blob.size / 1024),
+    });
+    setAttaching(false);
+    if (error) alert("Send failed: " + error.message);
+  }
+
   async function toggleReaction(messageId: string, emoji: string) {
     if (!userId) return;
     const existing = (reactionsByMsg[messageId] || []).find((r) => r.user_id === userId && r.emoji === emoji);
@@ -275,6 +428,13 @@ export default function ConversationPage() {
       counts[r.emoji] = (counts[r.emoji] || 0) + 1;
     });
     return Object.entries(counts);
+  }
+
+  function readStatus(messageCreatedAt: string): "sent" | "read" {
+    const others = participants.filter((p) => p.user_id !== userId);
+    if (others.length === 0) return "sent";
+    const allRead = others.every((p) => p.last_read_at && new Date(p.last_read_at) >= new Date(messageCreatedAt));
+    return allRead ? "read" : "sent";
   }
 
   if (loading) {
@@ -313,7 +473,7 @@ export default function ConversationPage() {
               : "Offline"}
           </p>
         </div>
-        <button onClick={() => alert("Voice calling isn't available yet.")} className="text-hub-textDim">
+        <button onClick={() => alert("Voice and video calling are coming in a future update.")} className="text-hub-textDim">
           <PhoneIcon />
         </button>
         <button onClick={() => setInfoOpen(true)} className="text-hub-textDim">
@@ -338,6 +498,7 @@ export default function ConversationPage() {
           lastDay = dayLabel(m.created_at);
           const isMine = m.sender_id === userId;
           const reactions = groupedReactionSummary(m.id);
+          const isAudio = isAudioAttachment(m.attachment_name);
 
           return (
             <div key={m.id}>
@@ -358,7 +519,8 @@ export default function ConversationPage() {
                     }`}
                   >
                     {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
-                    {m.attachment_url && (
+                    {m.attachment_url && isAudio && <VoiceNotePlayer url={m.attachment_url} isMine={isMine} />}
+                    {m.attachment_url && !isAudio && (
                       <a
                         href={m.attachment_url}
                         target="_blank"
@@ -397,7 +559,10 @@ export default function ConversationPage() {
                     </div>
                   )}
 
-                  <p className={`mt-0.5 px-1 text-[10px] text-hub-textDim ${isMine ? "text-right" : ""}`}>{timeShort(m.created_at)}</p>
+                  <p className={`mt-0.5 flex items-center gap-1 px-1 text-[10px] text-hub-textDim ${isMine ? "flex-row-reverse" : ""}`}>
+                    <span>{timeShort(m.created_at)}</span>
+                    {isMine && (readStatus(m.created_at) === "read" ? <DoubleCheckIcon className="text-hub-accentLight" /> : <SingleCheckIcon />)}
+                  </p>
                 </div>
               </div>
             </div>
@@ -407,13 +572,15 @@ export default function ConversationPage() {
       </div>
 
       <div className="flex items-center gap-2 border-t border-hub-border px-4 py-3">
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={attaching}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50"
-        >
-          {attaching ? <span className="text-xs">...</span> : <PlusIcon />}
-        </button>
+        {!recording && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={attaching}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50"
+          >
+            {attaching ? <span className="text-xs">...</span> : <PlusIcon />}
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -423,30 +590,74 @@ export default function ConversationPage() {
             e.target.value = "";
           }}
         />
-        <div className="flex flex-1 items-center gap-2 rounded-full border border-hub-border bg-hub-card2 px-4 py-2">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") sendMessage();
-            }}
-            placeholder="Message..."
-            className="flex-1 bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
-          />
-          <button onClick={() => alert("Emoji picker coming soon.")} className="text-hub-textDim">
-            <EmojiIcon />
+
+        {recording ? (
+          <div className="flex flex-1 items-center gap-3 rounded-full border border-red-400/40 bg-hub-card2 px-4 py-2.5">
+            <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+            <span className="flex-1 text-sm text-white">{formatDuration(recordSeconds)}</span>
+            <button onClick={stopRecordingAndDiscard} className="text-red-400">
+              <TrashIcon />
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-1 items-center gap-2 rounded-full border border-hub-border bg-hub-card2 px-4 py-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") sendMessage();
+              }}
+              placeholder="Message..."
+              className="flex-1 bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
+            />
+            <button onClick={() => setEmojiPickerOpen(true)} className="text-hub-textDim">
+              <EmojiIcon />
+            </button>
+          </div>
+        )}
+
+        {recording ? (
+          <button
+            onClick={stopRecordingAndSend}
+            disabled={attaching}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50"
+          >
+            <SendIcon />
           </button>
-        </div>
-        {draft.trim() ? (
+        ) : draft.trim() ? (
           <button onClick={sendMessage} disabled={sending} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50">
             <SendIcon />
           </button>
         ) : (
-          <button onClick={() => alert("Voice messages coming soon.")} className="flex h-9 w-9 shrink-0 items-center justify-center text-hub-textDim">
+          <button onClick={startRecording} className="flex h-9 w-9 shrink-0 items-center justify-center text-hub-textDim">
             <MicIcon />
           </button>
         )}
       </div>
+
+      {emojiPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setEmojiPickerOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-white">Emoji</p>
+              <button onClick={() => setEmojiPickerOpen(false)} className="text-hub-textDim">
+                <BackIcon />
+              </button>
+            </div>
+            <div className="grid grid-cols-8 gap-2">
+              {EMOJI_GRID.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => setDraft((prev) => prev + e)}
+                  className="flex h-9 items-center justify-center text-2xl active:scale-110"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {infoOpen && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setInfoOpen(false)}>
@@ -546,6 +757,43 @@ function SendIcon() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
       <path d="M4 12l16-8-6 16-3-7-7-1z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function PlayIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-white">
+      <path d="M6 4l14 8-14 8V4z" />
+    </svg>
+  );
+}
+function PauseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-white">
+      <rect x="6" y="4" width="4" height="16" />
+      <rect x="14" y="4" width="4" height="16" />
+    </svg>
+  );
+}
+function SingleCheckIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M4 12l5 5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function DoubleCheckIcon({ className }: { className?: string }) {
+  return (
+    <svg width="16" height="13" viewBox="0 0 28 24" fill="none" className={className}>
+      <path d="M2 12l5 5L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 12l5 5L26 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
