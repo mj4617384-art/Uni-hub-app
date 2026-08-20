@@ -39,6 +39,8 @@ export default function MarketplacePage() {
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const [isPro, setIsPro] = useState(false);
+  const [proSellerIds, setProSellerIds] = useState<Set<string>>(new Set());
+  const [cartCount, setCartCount] = useState(0);
   const [bottomPromoDismissed, setBottomPromoDismissed] = useState(false);
 
   useEffect(() => {
@@ -68,8 +70,22 @@ export default function MarketplacePage() {
       setItems(mapped);
       setLoading(false);
 
+      // Which sellers among these listings currently have an active Pro subscription
+      const sellerIds = Array.from(new Set(mapped.map((i) => i.seller_id)));
+      if (sellerIds.length > 0) {
+        const { data: proSubs } = await supabase
+          .from("seller_subscriptions")
+          .select("user_id, expires_at")
+          .in("user_id", sellerIds)
+          .eq("status", "active");
+        const activeIds = new Set(
+          (proSubs ?? []).filter((s: any) => new Date(s.expires_at) > new Date()).map((s: any) => s.user_id)
+        );
+        setProSellerIds(activeIds);
+      }
+
       if (uid) {
-        const [savesData, subData] = await Promise.all([
+        const [savesData, subData, cartData] = await Promise.all([
           supabase.from("marketplace_saves").select("item_id").eq("user_id", uid),
           supabase
             .from("seller_subscriptions")
@@ -79,6 +95,7 @@ export default function MarketplacePage() {
             .order("expires_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
+          supabase.from("marketplace_cart_items").select("id", { count: "exact", head: true }).eq("user_id", uid),
         ]);
         const savedMap: Record<string, boolean> = {};
         (savesData.data ?? []).forEach((s: any) => { savedMap[s.item_id] = true; });
@@ -87,6 +104,7 @@ export default function MarketplacePage() {
         if (subData.data && new Date(subData.data.expires_at) > new Date()) {
           setIsPro(true);
         }
+        setCartCount(cartData.count ?? 0);
       }
     }
     load();
@@ -166,6 +184,18 @@ export default function MarketplacePage() {
             👑 Pro
           </button>
         )}
+        <button
+          onClick={() => router.push("/marketplace/cart")}
+          aria-label="Cart"
+          className="relative shrink-0 text-white"
+        >
+          <CartIcon />
+          {cartCount > 0 && (
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-hub-accentLight text-[9px] font-medium text-white">
+              {cartCount}
+            </span>
+          )}
+        </button>
       </div>
 
       <div className="mx-5 mt-4 flex items-center gap-2">
@@ -278,7 +308,14 @@ export default function MarketplacePage() {
               </div>
 
               <button onClick={() => router.push(`/marketplace/${item.id}`)} className="flex-1 p-3 text-left">
-                <p className="text-sm font-medium text-white">{item.title}</p>
+                <div className="flex items-start justify-between gap-1">
+                  <p className="text-sm font-medium text-white">{item.title}</p>
+                  {proSellerIds.has(item.seller_id) && (
+                    <span className="shrink-0 rounded-full bg-yellow-400/10 border border-yellow-400/40 px-1.5 py-0.5 text-[9px] text-yellow-400">
+                      ⭐ Featured
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-sm font-semibold text-hub-accentLight">
                   ₦{Number(item.price).toLocaleString()}
                 </p>
@@ -408,6 +445,15 @@ function PlusIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CartIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <circle cx="9" cy="20" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="17" cy="20" r="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M2 3h2l2.4 12.2a2 2 0 002 1.8h8.6a2 2 0 002-1.6L21 8H6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
