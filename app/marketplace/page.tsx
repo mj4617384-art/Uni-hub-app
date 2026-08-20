@@ -38,6 +38,9 @@ export default function MarketplacePage() {
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
 
+  const [isPro, setIsPro] = useState(false);
+  const [bottomPromoDismissed, setBottomPromoDismissed] = useState(false);
+
   useEffect(() => {
     async function load() {
       const { data: userData } = await supabase.auth.getUser();
@@ -66,13 +69,24 @@ export default function MarketplacePage() {
       setLoading(false);
 
       if (uid) {
-        const { data: savesData } = await supabase
-          .from("marketplace_saves")
-          .select("item_id")
-          .eq("user_id", uid);
+        const [savesData, subData] = await Promise.all([
+          supabase.from("marketplace_saves").select("item_id").eq("user_id", uid),
+          supabase
+            .from("seller_subscriptions")
+            .select("status, expires_at")
+            .eq("user_id", uid)
+            .eq("status", "active")
+            .order("expires_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
         const savedMap: Record<string, boolean> = {};
-        (savesData ?? []).forEach((s: any) => { savedMap[s.item_id] = true; });
+        (savesData.data ?? []).forEach((s: any) => { savedMap[s.item_id] = true; });
         setSaved(savedMap);
+
+        if (subData.data && new Date(subData.data.expires_at) > new Date()) {
+          setIsPro(true);
+        }
       }
     }
     load();
@@ -138,12 +152,20 @@ export default function MarketplacePage() {
         <button onClick={() => router.back()} aria-label="Back">
           <BackIcon />
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-xl font-semibold text-white">
             Uni<span className="text-hub-accentLight">.hub</span> Marketplace
           </h1>
           <p className="text-sm text-hub-textDim">Buy and sell within your campus.</p>
         </div>
+        {isPro && (
+          <button
+            onClick={() => router.push("/marketplace/dashboard")}
+            className="flex shrink-0 items-center gap-1 rounded-full border border-yellow-400/40 bg-yellow-400/10 px-2.5 py-1 text-xs font-medium text-yellow-400"
+          >
+            👑 Pro
+          </button>
+        )}
       </div>
 
       <div className="mx-5 mt-4 flex items-center gap-2">
@@ -199,6 +221,21 @@ export default function MarketplacePage() {
           </button>
         ))}
       </div>
+
+      {!isPro && (
+        <div className="relative mx-5 mt-4 overflow-hidden rounded-xl border border-hub-border bg-gradient-to-br from-hub-accent to-hub-accentLight p-4">
+          <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium text-white">New Update</span>
+          <p className="mt-2 text-base font-semibold text-white">More features. More sales.</p>
+          <p className="mt-0.5 text-xs text-white/80">Upgrade to Seller Pro to unlock all tools and grow your business.</p>
+          <button
+            onClick={() => router.push("/marketplace/upgrade")}
+            className="mt-3 rounded-lg bg-white px-4 py-2 text-xs font-semibold text-hub-accent"
+          >
+            Upgrade Now
+          </button>
+          <span className="pointer-events-none absolute -right-2 -top-2 text-5xl opacity-90">👑</span>
+        </div>
+      )}
 
       <div className="mx-5 mt-5">
         {loading && <p className="text-sm text-hub-textDim">Loading...</p>}
@@ -300,6 +337,36 @@ export default function MarketplacePage() {
         </div>
       </div>
 
+      {!isPro && !bottomPromoDismissed && (
+        <div className="relative mx-5 mt-6 overflow-hidden rounded-xl border border-hub-border bg-hub-card2 p-4">
+          <button
+            onClick={() => setBottomPromoDismissed(true)}
+            aria-label="Dismiss"
+            className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full border border-hub-border text-hub-textDim"
+          >
+            ✕
+          </button>
+          <span className="rounded-full border border-hub-border px-2 py-0.5 text-[10px] text-hub-textDim">New Update</span>
+          <p className="mt-2 text-base font-semibold text-white">Built for serious sellers.</p>
+          <p className="text-base font-semibold text-white">Designed for your campus.</p>
+          <p className="mt-1 text-xs text-hub-textDim">New tools. Better insights. More sales.</p>
+
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            <PromoTile icon={<CrownTileIcon />} label="Seller Pro" sub="Unlock powerful selling tools." />
+            <PromoTile icon={<AnalyticsTileIcon />} label="Analytics" sub="Track views, sales & performance." />
+            <PromoTile icon={<MegaphoneTileIcon />} label="Boost Ads" sub="Get more visibility in your school." />
+            <PromoTile icon={<RefreshTileIcon />} label="Auto Relist" sub="Keep your items always active." />
+          </div>
+
+          <button
+            onClick={() => router.push("/marketplace/upgrade")}
+            className="mt-4 rounded-lg bg-hub-accentLight px-4 py-2 text-xs font-medium text-white"
+          >
+            See What&apos;s New
+          </button>
+        </div>
+      )}
+
       <button
         onClick={() => router.push("/marketplace/new")}
         className="fixed bottom-24 left-1/2 flex w-[calc(100%-2.5rem)] max-w-[calc(28rem-2.5rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-xl bg-hub-accent py-3.5 font-medium text-white"
@@ -317,6 +384,16 @@ export default function MarketplacePage() {
 
       <BottomNav />
     </main>
+  );
+}
+
+function PromoTile({ icon, label, sub }: { icon: React.ReactNode; label: string; sub: string }) {
+  return (
+    <div className="flex flex-col items-center rounded-lg border border-hub-border bg-hub-card p-2 text-center">
+      <span className="text-hub-accentLight">{icon}</span>
+      <p className="mt-1 text-[10px] font-medium text-white">{label}</p>
+      <p className="mt-0.5 hidden text-[9px] text-hub-textDim sm:block">{sub}</p>
+    </div>
   );
 }
 
@@ -380,6 +457,36 @@ function MessageIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <path d="M4 4h16v12H8l-4 4V4z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CrownTileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M3 8l4 3 5-6 5 6 4-3-2 10H5L3 8z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function AnalyticsTileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 20V10M12 20V4M20 20v-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MegaphoneTileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M3 10v4h3l6 4V6L6 10H3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M15 9a4 4 0 010 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+function RefreshTileIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 12a8 8 0 0113.66-5.66L20 8M20 4v4h-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 12a8 8 0 01-13.66 5.66L4 16M4 20v-4h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
