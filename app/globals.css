@@ -8,8 +8,8 @@
   --hub-card: #101a30;
   --hub-card2: #0d1526;
   --hub-border: #1e2a45;
-  --hub-accent: #2f6fed;
-  --hub-accent-light: #4c8cff;
+  --hub-accent: #229ed9;
+  --hub-accent-light: #2aabee;
   --hub-text: #ffffff;
   --hub-text-dim: #8a96ad;
 }
@@ -19,8 +19,8 @@
   --hub-card: #ffffff;
   --hub-card2: #f0f2f6;
   --hub-border: #e2e6ee;
-  --hub-accent: #2f6fed;
-  --hub-accent-light: #2f6fed;
+  --hub-accent: #0e8ecf;
+  --hub-accent-light: #0e8ecf;
   --hub-text: #0a0f1e;
   --hub-text-dim: #5b6478;
 }
@@ -45,11 +45,19 @@ input::placeholder {
   color: var(--hub-text-dim);
 }
 
-/* Stopgap: a lot of existing components use Tailwind's hardcoded
-   text-white instead of the theme-aware hub-text variable, so in
-   light mode that text stays white-on-white and disappears. This
-   forces it to follow the theme in light mode only — dark mode is
+/* Stopgap: most post/comment/caption text in the app uses Tailwind's
+   hardcoded text-white (and its opacity variants: text-white/90,
+   /80, /70 etc — each one is its own CSS class), instead of the
+   theme-aware hub-text variable. In light mode that stays literal
+   white and disappears on the light background. This forces all of
+   them to follow the theme in light mode only; dark mode is
    untouched since white-on-dark is already correct there. */
-[data-theme="light"] .text-white {
+[data-theme="light"] .text-white,
+[data-theme="light"] .text-white\/95,
+[data-theme="light"] .text-white\/90,
+[data-theme="light"] .text-white\/80,
+[data-theme="light"] .text-white\/70,
+[data-theme="light"] .text-white\/60,
+[data-theme="light"] .text-white\/50 {
   color: var(--hub-text) !important;
 }
