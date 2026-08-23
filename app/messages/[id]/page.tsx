@@ -2,11 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
-import dynamic from "next/dynamic";
-import emojiData from "@emoji-mart/data";
 import { supabase } from "@/lib/supabaseClient";
-
-const EmojiPicker = dynamic(() => import("@emoji-mart/react"), { ssr: false });
 
 type Msg = {
   id: string;
@@ -28,9 +24,52 @@ type Participant = {
   last_read_at: string | null;
 };
 
-type GifResult = { id: string; preview: string; full: string };
-
 const REACTION_SET = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"];
+const EMOJI_GRID = [
+  "😀", "😂", "🥰", "😍", "😎", "🤔", "😢", "😡", "👍", "👎", "🙏", "🔥",
+  "🎉", "❤️", "💯", "👏", "🙌", "😴", "🤯", "😭", "🥳", "🤝", "✅", "❌",
+  "⚡", "⭐", "💀", "👀", "🤗", "😅", "😇", "🤣", "😜", "🙄", "😬", "🥺",
+  "😤", "🤩", "😱", "🫡", "🙏🏾", "💪", "🎓", "📚", "☕", "🏆", "🎯", "🚀",
+];
+
+const WALLPAPERS: Record<string, { label: string; bg: string; pattern?: string }> = {
+  "doodle-navy": {
+    label: "Campus Doodle",
+    bg: "#0A0F1E",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='1.2' opacity='0.05'%3E%3Ccircle cx='30' cy='30' r='10'/%3E%3Cpath d='M100 20 L100 45 M88 32 L112 32'/%3E%3Crect x='150' y='140' width='20' height='16' rx='2'/%3E%3Ccircle cx='60' cy='150' r='6'/%3E%3Cpath d='M20 160 Q30 150 40 160 Q50 170 60 160'/%3E%3Ctext x='140' y='60' font-size='18' fill='%23ffffff' stroke='none' opacity='0.7'%3E%CF%80%3C/text%3E%3C/g%3E%3C/svg%3E")`,
+  },
+  "dots-teal": {
+    label: "Dotted",
+    bg: "#0A1A18",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Ccircle cx='4' cy='4' r='1.6' fill='%2334d399' opacity='0.15'/%3E%3C/svg%3E")`,
+  },
+  "solid-dark": { label: "Plain Dark", bg: "#0A0F1E" },
+  "waves-purple": {
+    label: "Waves",
+    bg: "#140A1E",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='60'%3E%3Cpath d='M0 30 Q30 10 60 30 T120 30' fill='none' stroke='%23a855f7' stroke-width='1.2' opacity='0.12'/%3E%3C/svg%3E")`,
+  },
+  "grid-blue": {
+    label: "Grid",
+    bg: "#0A1420",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cpath d='M40 0H0V40' fill='none' stroke='%233b82f6' stroke-width='1' opacity='0.1'/%3E%3C/svg%3E")`,
+  },
+  "hearts-pink": {
+    label: "Hearts",
+    bg: "#1A0A14",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cpath d='M30 45 Q15 30 15 20 Q15 12 22 12 Q30 12 30 20 Q30 12 38 12 Q45 12 45 20 Q45 30 30 45Z' fill='%23f472b6' opacity='0.12'/%3E%3C/svg%3E")`,
+  },
+  "leaves-green": {
+    label: "Leaves",
+    bg: "#0A1A0F",
+    pattern: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cpath d='M40 15 Q55 30 40 60 Q25 30 40 15Z' fill='%2334d399' opacity='0.1'/%3E%3C/svg%3E")`,
+  },
+  "solid-maroon": { label: "Maroon", bg: "#1A0A0F" },
+  "gradient-sunset": {
+    label: "Sunset",
+    bg: "linear-gradient(160deg, #2A0F1E 0%, #1E0A2A 50%, #0A0F2A 100%)",
+  },
+};
 
 function isOnline(lastSeenAt: string | null) {
   if (!lastSeenAt) return false;
@@ -59,9 +98,6 @@ function formatDuration(s: number) {
 
 function isAudioAttachment(name: string | null) {
   return !!name && /\.(webm|mp3|m4a|wav|ogg)$/i.test(name);
-}
-function isImageAttachment(name: string | null) {
-  return !!name && /\.(png|jpe?g|gif|webp)$/i.test(name);
 }
 
 const NAME_COLORS = ["text-hub-accentLight", "text-emerald-400", "text-pink-400", "text-orange-400", "text-purple-400", "text-cyan-400"];
@@ -122,9 +158,7 @@ function VoiceNotePlayer({ url, isMine }: { url: string; isMine: boolean }) {
 export default function ConversationPage() {
   const router = useRouter();
   const params = useParams();
-  // Accepts either [id] or [conversationId] as the folder name — avoids
-  // "invalid input syntax for type uuid: undefined" if they don't match.
-  const conversationId = (params?.id ?? params?.conversationId) as string;
+  const conversationId = params?.id as string;
 
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,12 +177,9 @@ export default function ConversationPage() {
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerTab, setPickerTab] = useState<"emoji" | "gif">("emoji");
-  const [gifQuery, setGifQuery] = useState("");
-  const [gifResults, setGifResults] = useState<GifResult[]>([]);
-  const [gifLoading, setGifLoading] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wallpaperFileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [recording, setRecording] = useState(false);
@@ -158,8 +189,31 @@ export default function ConversationPage() {
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const [viewportHeight, setViewportHeight] = useState<string>("100dvh");
+
+  const [wallpaper, setWallpaper] = useState("doodle-navy");
+  const [wallpaperPickerOpen, setWallpaperPickerOpen] = useState(false);
+  const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [callMenuOpen, setCallMenuOpen] = useState(false);
+  const [clearingChat, setClearingChat] = useState(false);
+
   useEffect(() => {
-    if (!conversationId) return;
+    function updateHeight() {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+      }
+    }
+    updateHeight();
+    window.visualViewport?.addEventListener("resize", updateHeight);
+    window.visualViewport?.addEventListener("scroll", updateHeight);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateHeight);
+      window.visualViewport?.removeEventListener("scroll", updateHeight);
+    };
+  }, []);
+
+  useEffect(() => {
     async function init() {
       const { data } = await supabase.auth.getUser();
       if (!data.user) {
@@ -177,7 +231,6 @@ export default function ConversationPage() {
   }, [conversationId]);
 
   useEffect(() => {
-    if (!conversationId) return;
     const channel = supabase
       .channel(`conversation-${conversationId}`)
       .on(
@@ -186,9 +239,11 @@ export default function ConversationPage() {
         async (payload) => {
           const m = payload.new as any;
           const sender = participants.find((p) => p.user_id === m.sender_id);
-          setMessages((prev) => [
-            ...prev,
-            {
+          setMessages((prev) => {
+            const tempIndex = prev.findIndex(
+              (msg) => msg.id.startsWith("temp-") && msg.sender_id === m.sender_id && msg.content === m.content
+            );
+            const resolved: Msg = {
               id: m.id,
               sender_id: m.sender_id,
               content: m.content,
@@ -197,8 +252,15 @@ export default function ConversationPage() {
               attachment_size_kb: m.attachment_size_kb,
               created_at: m.created_at,
               senderName: sender ? [sender.first_name, sender.last_name].filter(Boolean).join(" ") || "Student" : "Student",
-            },
-          ]);
+            };
+            if (tempIndex !== -1) {
+              const next = [...prev];
+              next[tempIndex] = resolved;
+              return next;
+            }
+            if (prev.some((msg) => msg.id === m.id)) return prev;
+            return [...prev, resolved];
+          });
           if (userId) await markRead(userId);
           setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 50);
         }
@@ -225,23 +287,10 @@ export default function ConversationPage() {
     };
   }, []);
 
-  useEffect(() => {
-    if (pickerOpen && pickerTab === "gif" && gifResults.length === 0 && !gifLoading) {
-      searchGifs("trending");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickerOpen, pickerTab]);
-
   async function loadConversation(uid: string) {
-    if (!conversationId) {
-      alert("Couldn't open this chat: no conversation ID in the URL.");
-      router.push("/messages");
-      return;
-    }
-
     const { data: conv, error } = await supabase
       .from("conversations")
-      .select("id, type, name, avatar_url, announcement")
+      .select("id, type, name, avatar_url, announcement, wallpaper")
       .eq("id", conversationId)
       .single();
 
@@ -253,6 +302,7 @@ export default function ConversationPage() {
 
     setConvType(conv.type);
     setAnnouncement(conv.announcement);
+    setWallpaper(conv.wallpaper || "doodle-navy");
 
     const { data: parts, error: partsErr } = await supabase
       .from("conversation_participants")
@@ -286,7 +336,6 @@ export default function ConversationPage() {
   }
 
   async function loadMessages() {
-    if (!conversationId) return;
     const { data, error } = await supabase
       .from("messages")
       .select("id, sender_id, content, attachment_url, attachment_name, attachment_size_kb, created_at, profiles(first_name, last_name)")
@@ -326,7 +375,6 @@ export default function ConversationPage() {
   }
 
   async function markRead(uid: string) {
-    if (!conversationId) return;
     await supabase
       .from("conversation_participants")
       .update({ last_read_at: new Date().toISOString() })
@@ -335,20 +383,38 @@ export default function ConversationPage() {
   }
 
   async function sendMessage() {
-    if (!userId || !draft.trim() || !conversationId) return;
-    setSending(true);
+    if (!userId || !draft.trim()) return;
     const text = draft.trim();
     setDraft("");
+    const tempId = `temp-${Date.now()}`;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        sender_id: userId,
+        content: text,
+        attachment_url: null,
+        attachment_name: null,
+        attachment_size_kb: null,
+        created_at: new Date().toISOString(),
+        senderName: "You",
+      },
+    ]);
+    setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 50);
+
+    setSending(true);
     const { error } = await supabase.from("messages").insert({ conversation_id: conversationId, sender_id: userId, content: text });
     setSending(false);
     if (error) {
       alert("Send failed: " + error.message);
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
       setDraft(text);
     }
   }
 
   async function sendAttachment(file: File) {
-    if (!userId || !conversationId) return;
+    if (!userId) return;
     setAttaching(true);
     const path = `${conversationId}/${Date.now()}-${file.name}`;
     const { error: upErr } = await supabase.storage.from("message-attachments").upload(path, file);
@@ -367,31 +433,6 @@ export default function ConversationPage() {
     });
     setAttaching(false);
     if (error) alert("Send failed: " + error.message);
-  }
-
-  async function sendGif(url: string) {
-    if (!userId || !conversationId) return;
-    setPickerOpen(false);
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: userId,
-      attachment_url: url,
-      attachment_name: "gif.gif",
-    });
-    if (error) alert("Send failed: " + error.message);
-  }
-
-  async function searchGifs(q: string) {
-    setGifQuery(q === "trending" ? "" : q);
-    setGifLoading(true);
-    try {
-      const res = await fetch(`/api/tenor/search?q=${encodeURIComponent(q || "trending")}`);
-      const data = await res.json();
-      setGifResults(data.gifs ?? []);
-    } catch {
-      setGifResults([]);
-    }
-    setGifLoading(false);
   }
 
   async function startRecording() {
@@ -423,7 +464,7 @@ export default function ConversationPage() {
 
   async function stopRecordingAndSend() {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || !userId || !conversationId) return;
+    if (!recorder || !userId) return;
 
     const stopped = new Promise<Blob>((resolve) => {
       recorder.onstop = () => {
@@ -488,6 +529,42 @@ export default function ConversationPage() {
     return allRead ? "read" : "sent";
   }
 
+  async function changeWallpaper(key: string) {
+    setWallpaper(key);
+    setWallpaperPickerOpen(false);
+    await supabase.from("conversations").update({ wallpaper: key }).eq("id", conversationId);
+  }
+
+  async function uploadWallpaper(file: File) {
+    setUploadingWallpaper(true);
+    const path = `${conversationId}/wallpaper-${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("chat-wallpapers").upload(path, file);
+    if (upErr) {
+      alert("Wallpaper upload failed: " + upErr.message);
+      setUploadingWallpaper(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("chat-wallpapers").getPublicUrl(path);
+    const value = `custom:${urlData.publicUrl}`;
+    setWallpaper(value);
+    setUploadingWallpaper(false);
+    setWallpaperPickerOpen(false);
+    await supabase.from("conversations").update({ wallpaper: value }).eq("id", conversationId);
+  }
+
+  async function clearChat() {
+    if (!window.confirm("Clear all messages in this chat? This can't be undone.")) return;
+    setClearingChat(true);
+    const { error } = await supabase.from("messages").delete().eq("conversation_id", conversationId);
+    setClearingChat(false);
+    setHeaderMenuOpen(false);
+    if (error) {
+      alert("Clear chat failed: " + error.message);
+      return;
+    }
+    setMessages([]);
+  }
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-hub-bg">
@@ -497,11 +574,13 @@ export default function ConversationPage() {
   }
 
   const onlineCount = convType === "group" ? participants.filter((p) => isOnline(p.last_seen_at)).length : 0;
+  const isCustomWallpaper = wallpaper.startsWith("custom:");
+  const customWallpaperUrl = isCustomWallpaper ? wallpaper.slice(7) : null;
 
   let lastDay = "";
 
   return (
-    <main className="flex h-screen flex-col bg-hub-bg">
+    <main className="flex flex-col bg-hub-bg" style={{ height: viewportHeight }}>
       <div className="flex items-center gap-3 border-b border-hub-border px-4 py-3">
         <button onClick={() => router.push("/messages")} className="text-white">
           <BackIcon />
@@ -524,12 +603,74 @@ export default function ConversationPage() {
               : "Offline"}
           </p>
         </div>
-        <button onClick={() => alert("Voice and video calling are coming in a future update.")} className="text-hub-textDim">
-          <PhoneIcon />
-        </button>
+
+        <div className="relative">
+          <button onClick={() => setCallMenuOpen((v) => !v)} className="text-hub-textDim">
+            <PhoneIcon />
+          </button>
+          {callMenuOpen && (
+            <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setCallMenuOpen(false);
+                  alert("Voice calling is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Voice call
+              </button>
+              <button
+                onClick={() => {
+                  setCallMenuOpen(false);
+                  alert("Video calling is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Video call
+              </button>
+            </div>
+          )}
+        </div>
+
         <button onClick={() => setInfoOpen(true)} className="text-hub-textDim">
           <InfoIcon />
         </button>
+
+        <div className="relative">
+          <button onClick={() => setHeaderMenuOpen((v) => !v)} className="text-hub-textDim">
+            <MoreDotsIcon />
+          </button>
+          {headerMenuOpen && (
+            <div className="absolute right-0 top-9 z-30 w-52 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  setWallpaperPickerOpen(true);
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Chat theme
+              </button>
+              <button
+                onClick={() => {
+                  setHeaderMenuOpen(false);
+                  alert("Media, links and docs view is coming in a future update.");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-white"
+              >
+                Media, links and docs
+              </button>
+              <div className="my-1 border-t border-hub-border" />
+              <button
+                onClick={clearChat}
+                disabled={clearingChat}
+                className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40"
+              >
+                {clearingChat ? "Clearing..." : "Clear chat"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {announcement && (
@@ -543,14 +684,32 @@ export default function ConversationPage() {
         </button>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto px-4 py-4"
+        style={
+          isCustomWallpaper
+            ? {
+                backgroundImage: `url("${customWallpaperUrl}")`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+              }
+            : {
+                backgroundColor: WALLPAPERS[wallpaper]?.bg?.startsWith("#") ? WALLPAPERS[wallpaper].bg : "#0A0F1E",
+                background: WALLPAPERS[wallpaper]?.bg?.startsWith("linear-gradient") ? WALLPAPERS[wallpaper].bg : undefined,
+                backgroundImage: WALLPAPERS[wallpaper]?.pattern || "none",
+                backgroundRepeat: "repeat",
+                backgroundSize: "200px 200px",
+              }
+        }
+      >
         {messages.map((m) => {
           const showDay = dayLabel(m.created_at) !== lastDay;
           lastDay = dayLabel(m.created_at);
           const isMine = m.sender_id === userId;
           const reactions = groupedReactionSummary(m.id);
           const isAudio = isAudioAttachment(m.attachment_name);
-          const isImage = isImageAttachment(m.attachment_name);
 
           return (
             <div key={m.id}>
@@ -567,19 +726,12 @@ export default function ConversationPage() {
                   <button
                     onClick={() => setReactionPickerFor(reactionPickerFor === m.id ? null : m.id)}
                     className={`relative rounded-2xl px-3.5 py-2.5 text-left text-sm ${
-                      isImage
-                        ? "p-1"
-                        : isMine
-                        ? "bg-hub-accentLight text-white"
-                        : "bg-hub-card text-white/90 border border-hub-border"
+                      isMine ? "bg-hub-accentLight text-white" : "bg-hub-card text-white/90 border border-hub-border"
                     }`}
                   >
                     {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
                     {m.attachment_url && isAudio && <VoiceNotePlayer url={m.attachment_url} isMine={isMine} />}
-                    {m.attachment_url && isImage && (
-                      <img src={m.attachment_url} alt="" className="max-h-64 rounded-xl object-contain" />
-                    )}
-                    {m.attachment_url && !isAudio && !isImage && (
+                    {m.attachment_url && !isAudio && (
                       <a
                         href={m.attachment_url}
                         target="_blank"
@@ -669,7 +821,7 @@ export default function ConversationPage() {
               placeholder="Message..."
               className="flex-1 bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none"
             />
-            <button onClick={() => setPickerOpen(true)} className="text-hub-textDim">
+            <button onClick={() => setEmojiPickerOpen(true)} className="text-hub-textDim">
               <EmojiIcon />
             </button>
           </div>
@@ -694,60 +846,26 @@ export default function ConversationPage() {
         )}
       </div>
 
-      {pickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setPickerOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="flex max-h-[75vh] w-full flex-col overflow-hidden rounded-t-2xl border-t border-hub-border bg-hub-card">
-            <div className="flex items-center justify-between border-b border-hub-border px-4 py-3">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPickerTab("emoji")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium ${pickerTab === "emoji" ? "bg-hub-accentLight text-white" : "text-hub-textDim"}`}
-                >
-                  Emoji
-                </button>
-                <button
-                  onClick={() => setPickerTab("gif")}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium ${pickerTab === "gif" ? "bg-hub-accentLight text-white" : "text-hub-textDim"}`}
-                >
-                  GIFs
-                </button>
-              </div>
-              <button onClick={() => setPickerOpen(false)} className="text-hub-textDim">
-                <CloseIcon />
+      {emojiPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setEmojiPickerOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-white">Emoji</p>
+              <button onClick={() => setEmojiPickerOpen(false)} className="text-hub-textDim">
+                <BackIcon />
               </button>
             </div>
-
-            {pickerTab === "emoji" ? (
-              <div className="overflow-y-auto">
-                <EmojiPicker
-                  data={emojiData}
-                  onEmojiSelect={(emoji: any) => setDraft((prev) => prev + emoji.native)}
-                  theme="dark"
-                  previewPosition="none"
-                  skinTonePosition="search"
-                />
-              </div>
-            ) : (
-              <div className="flex flex-1 flex-col overflow-hidden p-3">
-                <input
-                  value={gifQuery}
-                  onChange={(e) => searchGifs(e.target.value)}
-                  placeholder="Search GIFs..."
-                  className="rounded-full border border-hub-border bg-hub-card2 px-4 py-2 text-sm text-white placeholder:text-hub-textDim outline-none"
-                />
-                <div className="mt-3 grid grid-cols-3 gap-1.5 overflow-y-auto">
-                  {gifLoading && <p className="col-span-3 py-6 text-center text-sm text-hub-textDim">Loading...</p>}
-                  {!gifLoading && gifResults.length === 0 && (
-                    <p className="col-span-3 py-6 text-center text-sm text-hub-textDim">No GIFs found.</p>
-                  )}
-                  {gifResults.map((g) => (
-                    <button key={g.id} onClick={() => sendGif(g.full)} className="aspect-square overflow-hidden rounded-lg bg-hub-card2">
-                      <img src={g.preview} alt="" className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <div className="grid grid-cols-8 gap-2">
+              {EMOJI_GRID.map((e) => (
+                <button
+                  key={e}
+                  onClick={() => setDraft((prev) => prev + e)}
+                  className="flex h-9 items-center justify-center text-2xl active:scale-110"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -756,7 +874,16 @@ export default function ConversationPage() {
         <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setInfoOpen(false)}>
           <div onClick={(e) => e.stopPropagation()} className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
             <p className="text-sm font-semibold text-white">{convType === "group" ? "Members" : "About"}</p>
-            <div className="mt-3 flex flex-col gap-3">
+            <button
+              onClick={() => {
+                setInfoOpen(false);
+                setWallpaperPickerOpen(true);
+              }}
+              className="mt-3 w-full rounded-lg border border-hub-border py-2 text-center text-sm text-hub-accentLight"
+            >
+              Change wallpaper
+            </button>
+            <div className="mt-4 flex flex-col gap-3">
               {participants.map((p) => (
                 <div key={p.user_id} className="flex items-center gap-3">
                   <div className="relative h-9 w-9 shrink-0">
@@ -767,6 +894,50 @@ export default function ConversationPage() {
                   </div>
                   <p className="text-sm text-white">{[p.first_name, p.last_name].filter(Boolean).join(" ") || "Student"}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {wallpaperPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={() => setWallpaperPickerOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="max-h-[80vh] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
+            <p className="mb-3 text-sm font-semibold text-white">Chat wallpaper</p>
+
+            <input
+              ref={wallpaperFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) uploadWallpaper(e.target.files[0]);
+                e.target.value = "";
+              }}
+            />
+            <button
+              onClick={() => wallpaperFileInputRef.current?.click()}
+              disabled={uploadingWallpaper}
+              className="mb-3 w-full rounded-lg border border-hub-border py-2.5 text-center text-sm font-medium text-hub-accentLight disabled:opacity-50"
+            >
+              {uploadingWallpaper ? "Uploading..." : "Upload photo from gallery"}
+            </button>
+
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(WALLPAPERS).map(([key, w]) => (
+                <button
+                  key={key}
+                  onClick={() => changeWallpaper(key)}
+                  className={`h-20 rounded-xl border-2 ${wallpaper === key ? "border-hub-accentLight" : "border-hub-border"}`}
+                  style={{
+                    backgroundColor: w.bg.startsWith("#") ? w.bg : undefined,
+                    background: w.bg.startsWith("linear-gradient") ? w.bg : undefined,
+                    backgroundImage: w.pattern || "none",
+                    backgroundSize: "60px 60px",
+                  }}
+                >
+                  <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] text-white">{w.label}</span>
+                </button>
               ))}
             </div>
           </div>
@@ -795,6 +966,15 @@ function InfoIcon() {
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
       <path d="M12 11v6M12 8v.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MoreDotsIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="5" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="19" cy="12" r="1.8" />
     </svg>
   );
 }
@@ -835,13 +1015,6 @@ function EmojiIcon() {
       <circle cx="9" cy="10" r="1" fill="currentColor" />
       <circle cx="15" cy="10" r="1" fill="currentColor" />
       <path d="M8.5 14.5a4 4 0 007 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CloseIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
