@@ -4,25 +4,25 @@
 
 :root,
 [data-theme="dark"] {
-  --hub-bg: #0a0f1e;
-  --hub-card: #101a30;
-  --hub-card2: #0d1526;
-  --hub-border: #1e2a45;
-  --hub-accent: #229ed9;
-  --hub-accent-light: #2aabee;
+  --hub-bg: #17212b;
+  --hub-card: #202b36;
+  --hub-card2: #263442;
+  --hub-border: #2e3a46;
+  --hub-accent: #2b5278;
+  --hub-accent-light: #229ed9;
   --hub-text: #ffffff;
-  --hub-text-dim: #8a96ad;
+  --hub-text-dim: #8fa3b5;
 }
 
 [data-theme="light"] {
-  --hub-bg: #f5f7fa;
+  --hub-bg: #f5f7f9;
   --hub-card: #ffffff;
-  --hub-card2: #f0f2f6;
-  --hub-border: #e2e6ee;
-  --hub-accent: #0e8ecf;
-  --hub-accent-light: #0e8ecf;
-  --hub-text: #0a0f1e;
-  --hub-text-dim: #5b6478;
+  --hub-card2: #eef2f5;
+  --hub-border: #e1e7eb;
+  --hub-accent: #168ac4;
+  --hub-accent-light: #229ed9;
+  --hub-text: #17212b;
+  --hub-text-dim: #71808f;
 }
 
 html,
@@ -60,4 +60,15 @@ input::placeholder {
 [data-theme="light"] .text-white\/60,
 [data-theme="light"] .text-white\/50 {
   color: var(--hub-text) !important;
+}
+
+/* For text that sits on a fixed dark image/gradient in BOTH themes
+   (like Home's greeting card, over the campus photo) — this must
+   stay white regardless of theme, so it's deliberately a different
+   class name than text-white and is untouched by the override above. */
+.hub-always-white {
+  color: #ffffff !important;
+}
+.hub-always-white-80 {
+  color: rgba(255, 255, 255, 0.8) !important;
 }
