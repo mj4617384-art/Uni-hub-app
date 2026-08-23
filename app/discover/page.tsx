@@ -56,6 +56,22 @@ type Person = {
   bio: string | null;
 };
 
+type PulseItem = {
+  id: string;
+  media_url: string;
+  media_type: string;
+  created_at: string;
+};
+
+type PulseGroup = {
+  user_id: string;
+  first_name: string;
+  avatar_url: string | null;
+  items: PulseItem[];
+  hasUnviewed: boolean;
+  isMine: boolean;
+};
+
 const EXPLORE_CATEGORIES = [
   "Campus Life",
   "News",
@@ -80,6 +96,7 @@ const followingSubTabs = ["People", "Posts", "Pulse"] as const;
 type FollowingSubTab = (typeof followingSubTabs)[number];
 
 const PEOPLE_PAGE_SIZE = 10;
+const PULSE_ITEM_DURATION_MS = 5000;
 
 function keyFor(source: Source, id: string) {
   return `${source}-${id}`;
@@ -184,6 +201,19 @@ export default function DiscoverPage() {
   const [followBusyId, setFollowBusyId] = useState<string | null>(null);
   const [messageBusyId, setMessageBusyId] = useState<string | null>(null);
 
+  // --- Pulse state ---
+  const [pulsesLoaded, setPulsesLoaded] = useState(false);
+  const [pulseGroups, setPulseGroups] = useState<PulseGroup[]>([]);
+  const [pulseLoading, setPulseLoading] = useState(false);
+  const [uploadingPulse, setUploadingPulse] = useState(false);
+  const pulseFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerGroupIndex, setViewerGroupIndex] = useState(0);
+  const [viewerItemIndex, setViewerItemIndex] = useState(0);
+  const [viewerProgress, setViewerProgress] = useState(0);
+  const viewerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const videoObserverRef = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     videoObserverRef.current = new IntersectionObserver(
@@ -250,6 +280,33 @@ export default function DiscoverPage() {
       loadFollowData();
     }
   }, [activeTab, userId, followingLoaded]);
+
+  useEffect(() => {
+    if (activeTab === "Following" && followingSubTab === "Pulse" && userId && followingLoaded && !pulsesLoaded) {
+      loadPulses();
+    }
+  }, [activeTab, followingSubTab, userId, followingLoaded, pulsesLoaded]);
+
+  useEffect(() => {
+    if (!viewerOpen) {
+      if (viewerTimerRef.current) clearInterval(viewerTimerRef.current);
+      return;
+    }
+    setViewerProgress(0);
+    const startedAt = Date.now();
+    viewerTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const pct = Math.min(100, (elapsed / PULSE_ITEM_DURATION_MS) * 100);
+      setViewerProgress(pct);
+      if (pct >= 100) {
+        goNextItem();
+      }
+    }, 50);
+    return () => {
+      if (viewerTimerRef.current) clearInterval(viewerTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerOpen, viewerGroupIndex, viewerItemIndex]);
 
   async function loadForYou() {
     setForYouLoading(true);
@@ -423,6 +480,138 @@ export default function DiscoverPage() {
       return;
     }
     router.push(`/messages/${data}`);
+  }
+
+  // --- Pulse logic ---
+  async function loadPulses() {
+    if (!userId) return;
+    setPulseLoading(true);
+    setPulsesLoaded(true);
+
+    const ids = [userId, ...Array.from(followingIds)];
+    const { data: pulseRows, error } = await supabase
+      .from("pulses")
+      .select("id, user_id, media_url, media_type, created_at, profiles(first_name, avatar_url)")
+      .in("user_id", ids)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      setPulseLoading(false);
+      return;
+    }
+
+    const rows = pulseRows ?? [];
+    const pulseIds = rows.map((r: any) => r.id);
+
+    let viewedSet = new Set<string>();
+    if (pulseIds.length > 0) {
+      const { data: views } = await supabase
+        .from("pulse_views")
+        .select("pulse_id")
+        .eq("viewer_id", userId)
+        .in("pulse_id", pulseIds);
+      viewedSet = new Set((views ?? []).map((v: any) => v.pulse_id));
+    }
+
+    const grouped = new Map<string, PulseGroup>();
+    for (const row of rows as any[]) {
+      const uid = row.user_id;
+      if (!grouped.has(uid)) {
+        grouped.set(uid, {
+          user_id: uid,
+          first_name: row.profiles?.first_name ?? "Student",
+          avatar_url: row.profiles?.avatar_url ?? null,
+          items: [],
+          hasUnviewed: false,
+          isMine: uid === userId,
+        });
+      }
+      const group = grouped.get(uid)!;
+      group.items.push({ id: row.id, media_url: row.media_url, media_type: row.media_type, created_at: row.created_at });
+      if (!viewedSet.has(row.id)) group.hasUnviewed = true;
+    }
+
+    const groupsArr = Array.from(grouped.values());
+    const mine = groupsArr.filter((g) => g.isMine);
+    const others = groupsArr
+      .filter((g) => !g.isMine)
+      .sort((a, b) => (a.hasUnviewed === b.hasUnviewed ? 0 : a.hasUnviewed ? -1 : 1));
+
+    setPulseGroups([...mine, ...others]);
+    setPulseLoading(false);
+  }
+
+  async function uploadPulse(file: File) {
+    if (!userId) return;
+    setUploadingPulse(true);
+    const mediaType = file.type.startsWith("video") ? "video" : "image";
+    const path = `${userId}/${Date.now()}-${file.name}`;
+    const { error: upErr } = await supabase.storage.from("pulses").upload(path, file);
+    if (upErr) {
+      alert("Pulse upload failed: " + upErr.message);
+      setUploadingPulse(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("pulses").getPublicUrl(path);
+    const { error } = await supabase.from("pulses").insert({
+      user_id: userId,
+      media_url: urlData.publicUrl,
+      media_type: mediaType,
+    });
+    setUploadingPulse(false);
+    if (error) {
+      alert("Post failed: " + error.message);
+      return;
+    }
+    setPulsesLoaded(false);
+    await loadPulses();
+  }
+
+  function openViewer(groupIndex: number) {
+    setViewerGroupIndex(groupIndex);
+    setViewerItemIndex(0);
+    setViewerOpen(true);
+    markViewed(pulseGroups[groupIndex]?.items[0]?.id);
+  }
+
+  function closeViewer() {
+    setViewerOpen(false);
+  }
+
+  async function markViewed(pulseId: string | undefined) {
+    if (!pulseId || !userId) return;
+    await supabase.from("pulse_views").upsert({ pulse_id: pulseId, viewer_id: userId }, { onConflict: "pulse_id,viewer_id" });
+  }
+
+  function goNextItem() {
+    const group = pulseGroups[viewerGroupIndex];
+    if (!group) return closeViewer();
+    if (viewerItemIndex < group.items.length - 1) {
+      const nextIndex = viewerItemIndex + 1;
+      setViewerItemIndex(nextIndex);
+      markViewed(group.items[nextIndex]?.id);
+    } else if (viewerGroupIndex < pulseGroups.length - 1) {
+      const nextGroup = viewerGroupIndex + 1;
+      setViewerGroupIndex(nextGroup);
+      setViewerItemIndex(0);
+      markViewed(pulseGroups[nextGroup]?.items[0]?.id);
+    } else {
+      closeViewer();
+    }
+  }
+
+  function goPrevItem() {
+    const group = pulseGroups[viewerGroupIndex];
+    if (!group) return;
+    if (viewerItemIndex > 0) {
+      setViewerItemIndex(viewerItemIndex - 1);
+    } else if (viewerGroupIndex > 0) {
+      const prevGroup = viewerGroupIndex - 1;
+      setViewerGroupIndex(prevGroup);
+      setViewerItemIndex(pulseGroups[prevGroup].items.length - 1);
+    }
   }
 
   async function loadCategory(category: string) {
@@ -1027,6 +1216,8 @@ export default function DiscoverPage() {
 
   const isExternalCategory = selectedCategory ? !!EXTERNAL_CATEGORY_TABLES[selectedCategory] : false;
   const suggestedPeople = people.filter((p) => !followingIds.has(p.id));
+  const activeViewerGroup = pulseGroups[viewerGroupIndex];
+  const activeViewerItem = activeViewerGroup?.items[viewerItemIndex];
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -1144,11 +1335,76 @@ export default function DiscoverPage() {
           )}
 
           {followingSubTab === "Pulse" && (
-            <div className="px-5 py-10 text-center">
-              <p className="text-sm text-white/90">Pulse is coming soon</p>
-              <p className="mt-1 text-xs text-hub-textDim">
-                24-hour updates from people you follow will show up here in a future update.
-              </p>
+            <div className="mt-3">
+              <input
+                ref={pulseFileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.[0]) uploadPulse(e.target.files[0]);
+                  e.target.value = "";
+                }}
+              />
+
+              {pulseLoading && <p className="px-5 text-center text-sm text-hub-textDim">Loading...</p>}
+
+              {!pulseLoading && (
+                <div className="flex gap-4 overflow-x-auto px-5 pb-2">
+                  <button
+                    onClick={() => pulseFileInputRef.current?.click()}
+                    disabled={uploadingPulse}
+                    className="flex shrink-0 flex-col items-center gap-1.5"
+                  >
+                    <div className="relative h-16 w-16">
+                      <div className="h-16 w-16 overflow-hidden rounded-full border-2 border-hub-border bg-hub-card2 flex items-center justify-center text-sm font-medium text-white">
+                        {myAvatarUrl ? (
+                          <img src={myAvatarUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          myFirstName?.charAt(0).toUpperCase() ?? "U"
+                        )}
+                      </div>
+                      <span className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-hub-accentLight text-xs text-white border-2 border-hub-bg">
+                        {uploadingPulse ? "..." : "+"}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-hub-textDim">Your Pulse</span>
+                  </button>
+
+                  {pulseGroups
+                    .filter((g) => !g.isMine)
+                    .map((group, idx) => (
+                      <button
+                        key={group.user_id}
+                        onClick={() => openViewer(pulseGroups.findIndex((g) => g.user_id === group.user_id))}
+                        className="flex shrink-0 flex-col items-center gap-1.5"
+                      >
+                        <div
+                          className={`h-16 w-16 rounded-full p-[2px] ${
+                            group.hasUnviewed
+                              ? "bg-gradient-to-tr from-hub-accentLight to-purple-400"
+                              : "bg-hub-border"
+                          }`}
+                        >
+                          <div className="h-full w-full overflow-hidden rounded-full border-2 border-hub-bg bg-hub-card2 flex items-center justify-center text-sm font-medium text-white">
+                            {group.avatar_url ? (
+                              <img src={group.avatar_url} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              group.first_name.charAt(0).toUpperCase()
+                            )}
+                          </div>
+                        </div>
+                        <span className="max-w-[64px] truncate text-[11px] text-hub-textDim">{group.first_name}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+
+              {!pulseLoading && pulseGroups.length <= (pulseGroups.some((g) => g.isMine) ? 1 : 0) && (
+                <p className="px-5 py-8 text-center text-sm text-hub-textDim">
+                  No active pulses from people you follow yet.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -1271,6 +1527,70 @@ export default function DiscoverPage() {
         </div>
       )}
 
+      {viewerOpen && activeViewerGroup && activeViewerItem && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black">
+          <div className="flex gap-1 px-3 pt-3">
+            {activeViewerGroup.items.map((item, idx) => (
+              <div key={item.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/30">
+                <div
+                  className="h-full bg-white"
+                  style={{
+                    width:
+                      idx < viewerItemIndex ? "100%" : idx === viewerItemIndex ? `${viewerProgress}%` : "0%",
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 overflow-hidden rounded-full bg-hub-card2 border border-white/20 flex items-center justify-center text-xs font-medium text-white">
+                {activeViewerGroup.avatar_url ? (
+                  <img src={activeViewerGroup.avatar_url} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  activeViewerGroup.first_name.charAt(0).toUpperCase()
+                )}
+              </div>
+              <span className="text-sm font-medium text-white">{activeViewerGroup.first_name}</span>
+              <span className="text-xs text-white/60">{timeAgo(activeViewerItem.created_at)}</span>
+            </div>
+            <button onClick={closeViewer} className="text-white">
+              <CloseIcon />
+            </button>
+          </div>
+
+          <div className="relative flex-1">
+            {activeViewerItem.media_type === "video" ? (
+              <video
+                key={activeViewerItem.id}
+                src={activeViewerItem.media_url}
+                autoPlay
+                muted
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <img
+                key={activeViewerItem.id}
+                src={activeViewerItem.media_url}
+                alt=""
+                className="h-full w-full object-contain"
+              />
+            )}
+            <button
+              onClick={goPrevItem}
+              className="absolute left-0 top-0 h-full w-1/3"
+              aria-label="Previous"
+            />
+            <button
+              onClick={goNextItem}
+              className="absolute right-0 top-0 h-full w-1/3"
+              aria-label="Next"
+            />
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </main>
   );
@@ -1281,6 +1601,13 @@ function SearchIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-hub-textDim">
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
       <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CloseIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
