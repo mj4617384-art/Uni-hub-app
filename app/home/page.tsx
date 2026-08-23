@@ -182,7 +182,10 @@ export default function HomePage() {
         department={department}
       />
 
-      {/* Greeting card — solid navy on the left blending into the campus photo on the right */}
+      {/* Greeting card — solid navy on the left blending into the campus photo on the right.
+          Text here uses hub-always-white / hub-always-white-80 (NOT text-white) because
+          it sits on a fixed dark photo overlay in both themes and must never flip to dark
+          text in light mode, unlike ordinary text-white elsewhere in the app. */}
       <div
         className="relative mx-5 mt-5 overflow-hidden rounded-2xl p-5 bg-cover bg-center"
         style={{
@@ -190,10 +193,10 @@ export default function HomePage() {
         }}
       >
         <div className="relative max-w-[75%]">
-          <p className="text-lg font-medium text-white">
+          <p className="text-lg font-medium hub-always-white">
             {getGreeting()}{firstName ? `, ${firstName}` : ""} 👋
           </p>
-          <p className="mt-1 text-sm text-white/80">
+          <p className="mt-1 text-sm hub-always-white-80">
             Here&apos;s what&apos;s happening around your campus.
           </p>
           <div className="mt-2 h-0.5 w-10 rounded-full bg-hub-accentLight" />
