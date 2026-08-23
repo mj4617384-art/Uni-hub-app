@@ -76,6 +76,9 @@ const EXTERNAL_CATEGORY_TABLES: Record<string, { table: string; route: string; s
 const discoverTabs = ["For You", "Following", "Explore"] as const;
 type DiscoverTab = (typeof discoverTabs)[number];
 
+const followingSubTabs = ["People", "Posts", "Pulse"] as const;
+type FollowingSubTab = (typeof followingSubTabs)[number];
+
 const PEOPLE_PAGE_SIZE = 10;
 
 function keyFor(source: Source, id: string) {
@@ -137,6 +140,7 @@ export default function DiscoverPage() {
   const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<DiscoverTab>("For You");
+  const [followingSubTab, setFollowingSubTab] = useState<FollowingSubTab>("People");
 
   const [forYouPosts, setForYouPosts] = useState<UnifiedPost[] | null>(null);
   const [forYouLoading, setForYouLoading] = useState(false);
@@ -170,6 +174,7 @@ export default function DiscoverPage() {
   const [followingLoaded, setFollowingLoaded] = useState(false);
   const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [followerIds, setFollowerIds] = useState<Set<string>>(new Set());
+  const [followedProfiles, setFollowedProfiles] = useState<Person[]>([]);
   const [followingFeed, setFollowingFeed] = useState<UnifiedPost[] | null>(null);
   const [followingFeedLoading, setFollowingFeedLoading] = useState(false);
   const [people, setPeople] = useState<Person[]>([]);
@@ -310,9 +315,25 @@ export default function DiscoverPage() {
     setFollowingIds(followingSet);
     setFollowerIds(followerSet);
 
-    await loadPeople(true);
+    await Promise.all([loadPeople(true), loadFollowedProfiles(followingSet)]);
     if (followingSet.size > 0) await loadFollowingFeed(followingSet);
     else setFollowingFeed([]);
+  }
+
+  async function loadFollowedProfiles(ids: Set<string>) {
+    if (ids.size === 0) {
+      setFollowedProfiles([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, first_name, avatar_url, bio")
+      .in("id", Array.from(ids));
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setFollowedProfiles(data ?? []);
   }
 
   async function loadFollowingFeed(ids: Set<string>) {
@@ -379,7 +400,7 @@ export default function DiscoverPage() {
         const next = new Set(followingIds);
         next.delete(personId);
         setFollowingIds(next);
-        await loadFollowingFeed(next);
+        await Promise.all([loadFollowingFeed(next), loadFollowedProfiles(next)]);
       }
     } else {
       const { error } = await supabase.from("follows").insert({ follower_id: userId, following_id: personId });
@@ -387,7 +408,7 @@ export default function DiscoverPage() {
         const next = new Set(followingIds);
         next.add(personId);
         setFollowingIds(next);
-        await loadFollowingFeed(next);
+        await Promise.all([loadFollowingFeed(next), loadFollowedProfiles(next)]);
       }
     }
     setFollowBusyId(null);
@@ -1005,6 +1026,7 @@ export default function DiscoverPage() {
   }
 
   const isExternalCategory = selectedCategory ? !!EXTERNAL_CATEGORY_TABLES[selectedCategory] : false;
+  const suggestedPeople = people.filter((p) => !followingIds.has(p.id));
 
   return (
     <main className="min-h-screen bg-hub-bg pb-28">
@@ -1054,44 +1076,79 @@ export default function DiscoverPage() {
 
       {activeTab === "Following" && (
         <div className="mt-3">
-          {followingFeedLoading && <p className="px-5 text-center text-sm text-hub-textDim">Loading...</p>}
-
-          {!followingFeedLoading && followingIds.size === 0 && (
-            <div className="px-5 py-6 text-center">
-              <p className="text-sm text-white/90">You&apos;re not following anyone yet</p>
-              <p className="mt-1 text-xs text-hub-textDim">Follow people below to see their posts here.</p>
-            </div>
-          )}
-
-          {!followingFeedLoading && followingIds.size > 0 && followingFeed && followingFeed.length === 0 && (
-            <p className="px-5 py-6 text-center text-sm text-hub-textDim">
-              No posts yet from people you follow.
-            </p>
-          )}
-
-          {!followingFeedLoading && (followingFeed ?? []).map(renderPostCard)}
-
-          <div className="mt-4 border-t border-hub-border px-5 pt-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-white">Following</p>
-              <span className="rounded-full bg-hub-card2 px-2 py-0.5 text-xs text-hub-textDim">{followingIds.size}</span>
-            </div>
-            <p className="mt-1 text-xs text-hub-textDim">Posts from people you follow will show up above.</p>
-          </div>
-
-          <div className="mt-2">
-            {people.map(renderPersonRow)}
-          </div>
-
-          {peopleHasMore && (
-            <div className="px-5 py-4">
+          <div className="flex border-b border-hub-border px-5">
+            {followingSubTabs.map((tab) => (
               <button
-                onClick={() => loadPeople(false)}
-                disabled={peopleLoading}
-                className="w-full rounded-full border border-hub-border py-2 text-center text-xs font-medium text-hub-accentLight disabled:opacity-40"
+                key={tab}
+                onClick={() => setFollowingSubTab(tab)}
+                className={`mr-6 pb-2.5 text-sm font-medium border-b-2 -mb-px ${
+                  followingSubTab === tab
+                    ? "border-hub-accentLight text-white"
+                    : "border-transparent text-hub-textDim"
+                }`}
               >
-                {peopleLoading ? "Loading..." : "Load more"}
+                {tab}
               </button>
+            ))}
+          </div>
+
+          {followingSubTab === "People" && (
+            <div>
+              <div className="border-b border-hub-border px-5 py-3">
+                <p className="text-sm font-medium text-white">People you follow</p>
+                <p className="text-xs text-hub-textDim">{followingIds.size} people</p>
+              </div>
+
+              {followedProfiles.length === 0 ? (
+                <p className="px-5 py-6 text-center text-sm text-hub-textDim">
+                  You&apos;re not following anyone yet — follow people below.
+                </p>
+              ) : (
+                followedProfiles.map(renderPersonRow)
+              )}
+
+              <div className="border-b border-t border-hub-border px-5 py-3">
+                <p className="text-sm font-medium text-white">Find people</p>
+              </div>
+              {suggestedPeople.map(renderPersonRow)}
+
+              {peopleHasMore && (
+                <div className="px-5 py-4">
+                  <button
+                    onClick={() => loadPeople(false)}
+                    disabled={peopleLoading}
+                    className="w-full rounded-full border border-hub-border py-2 text-center text-xs font-medium text-hub-accentLight disabled:opacity-40"
+                  >
+                    {peopleLoading ? "Loading..." : "Load more"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {followingSubTab === "Posts" && (
+            <div className="mt-1">
+              {followingFeedLoading && <p className="px-5 py-6 text-center text-sm text-hub-textDim">Loading...</p>}
+              {!followingFeedLoading && followingIds.size === 0 && (
+                <p className="px-5 py-6 text-center text-sm text-hub-textDim">
+                  Follow people to see their posts here.
+                </p>
+              )}
+              {!followingFeedLoading && followingIds.size > 0 && followingFeed && followingFeed.length === 0 && (
+                <p className="px-5 py-6 text-center text-sm text-hub-textDim">
+                  No posts yet from people you follow.
+                </p>
+              )}
+              {!followingFeedLoading && (followingFeed ?? []).map(renderPostCard)}
+            </div>
+          )}
+
+          {followingSubTab === "Pulse" && (
+            <div className="px-5 py-10 text-center">
+              <p className="text-sm text-white/90">Pulse is coming soon</p>
+              <p className="mt-1 text-xs text-hub-textDim">
+                24-hour updates from people you follow will show up here in a future update.
+              </p>
             </div>
           )}
         </div>
