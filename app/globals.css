@@ -4,25 +4,25 @@
 
 :root,
 [data-theme="dark"] {
-  --hub-bg: #0a0f1e;
-  --hub-card: #101a30;
-  --hub-card2: #0d1526;
-  --hub-border: #1e2a45;
-  --hub-accent: #2f6fed;
-  --hub-accent-light: #4c8cff;
+  --hub-bg: #09090b;
+  --hub-card: #111113;
+  --hub-card2: #18181b;
+  --hub-border: #27272a;
+  --hub-accent: #1d6f9f;
+  --hub-accent-light: #38b6ff;
   --hub-text: #ffffff;
-  --hub-text-dim: #8a96ad;
+  --hub-text-dim: #a1a1aa;
 }
 
 [data-theme="light"] {
-  --hub-bg: #f5f7fa;
-  --hub-card: #ffffff;
-  --hub-card2: #f0f2f6;
-  --hub-border: #e2e6ee;
-  --hub-accent: #2f6fed;
-  --hub-accent-light: #2f6fed;
-  --hub-text: #0a0f1e;
-  --hub-text-dim: #5b6478;
+  --hub-bg: #ffffff;
+  --hub-card: #f8f8f8;
+  --hub-card2: #f4f4f5;
+  --hub-border: #e4e4e7;
+  --hub-accent: #0b6fcb;
+  --hub-accent-light: #087fea;
+  --hub-text: #18181b;
+  --hub-text-dim: #52525b;
 }
 
 html,
