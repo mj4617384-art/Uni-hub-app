@@ -97,6 +97,7 @@ type FollowingSubTab = (typeof followingSubTabs)[number];
 
 const PEOPLE_PAGE_SIZE = 10;
 const PULSE_ITEM_DURATION_MS = 5000;
+const TEXT_PULSE_COLORS = ["#2F6FED", "#E1306C", "#25D366", "#7C3AED", "#F59E0B", "#0EA5E9"];
 
 function keyFor(source: Source, id: string) {
   return `${source}-${id}`;
@@ -207,6 +208,11 @@ export default function DiscoverPage() {
   const [pulseLoading, setPulseLoading] = useState(false);
   const [uploadingPulse, setUploadingPulse] = useState(false);
   const pulseFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [addPulseOpen, setAddPulseOpen] = useState(false);
+  const [textPulseOpen, setTextPulseOpen] = useState(false);
+  const [textPulseDraft, setTextPulseDraft] = useState("");
+  const [textPulseColor, setTextPulseColor] = useState("#2F6FED");
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerGroupIndex, setViewerGroupIndex] = useState(0);
@@ -545,15 +551,31 @@ export default function DiscoverPage() {
 
   async function uploadPulse(file: File) {
     if (!userId) return;
+
+    const maxBytes = 25 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      alert("That file is too large (max 25MB). Try a shorter video or a photo instead.");
+      return;
+    }
+
     setUploadingPulse(true);
     const mediaType = file.type.startsWith("video") ? "video" : "image";
     const path = `${userId}/${Date.now()}-${file.name}`;
-    const { error: upErr } = await supabase.storage.from("pulses").upload(path, file);
+
+    const timeoutPromise = new Promise<{ error: any }>((resolve) =>
+      setTimeout(() => resolve({ error: { message: "Upload timed out — your connection may be too slow right now." } }), 45000)
+    );
+
+    const uploadPromise = supabase.storage.from("pulses").upload(path, file).then((res) => ({ error: res.error }));
+
+    const { error: upErr } = await Promise.race([uploadPromise, timeoutPromise]);
+
     if (upErr) {
       alert("Pulse upload failed: " + upErr.message);
       setUploadingPulse(false);
       return;
     }
+
     const { data: urlData } = supabase.storage.from("pulses").getPublicUrl(path);
     const { error } = await supabase.from("pulses").insert({
       user_id: userId,
@@ -561,6 +583,39 @@ export default function DiscoverPage() {
       media_type: mediaType,
     });
     setUploadingPulse(false);
+    if (error) {
+      alert("Post failed: " + error.message);
+      return;
+    }
+    setPulsesLoaded(false);
+    await loadPulses();
+  }
+
+  async function postTextPulse(text: string, bgColor: string) {
+    if (!userId || !text.trim()) return;
+    setUploadingPulse(true);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="720" height="1280" fill="${bgColor}"/><text x="50%" y="50%" font-size="48" fill="white" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .slice(0, 120)}</text></svg>`;
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const path = `${userId}/text-${Date.now()}.svg`;
+
+    const { error: upErr } = await supabase.storage.from("pulses").upload(path, blob, { contentType: "image/svg+xml" });
+    if (upErr) {
+      alert("Post failed: " + upErr.message);
+      setUploadingPulse(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage.from("pulses").getPublicUrl(path);
+    const { error } = await supabase.from("pulses").insert({
+      user_id: userId,
+      media_url: urlData.publicUrl,
+      media_type: "image",
+    });
+    setUploadingPulse(false);
+    setTextPulseOpen(false);
+    setTextPulseDraft("");
     if (error) {
       alert("Post failed: " + error.message);
       return;
@@ -1352,7 +1407,7 @@ export default function DiscoverPage() {
               {!pulseLoading && (
                 <div className="flex gap-4 overflow-x-auto px-5 pb-2">
                   <button
-                    onClick={() => pulseFileInputRef.current?.click()}
+                    onClick={() => setAddPulseOpen(true)}
                     disabled={uploadingPulse}
                     className="flex shrink-0 flex-col items-center gap-1.5"
                   >
@@ -1373,7 +1428,7 @@ export default function DiscoverPage() {
 
                   {pulseGroups
                     .filter((g) => !g.isMine)
-                    .map((group, idx) => (
+                    .map((group) => (
                       <button
                         key={group.user_id}
                         onClick={() => openViewer(pulseGroups.findIndex((g) => g.user_id === group.user_id))}
@@ -1587,6 +1642,77 @@ export default function DiscoverPage() {
               className="absolute right-0 top-0 h-full w-1/3"
               aria-label="Next"
             />
+          </div>
+        </div>
+      )}
+
+      {addPulseOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={() => setAddPulseOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-base font-semibold text-white">Add Pulse</p>
+              <button onClick={() => setAddPulseOpen(false)} className="text-hub-textDim">✕</button>
+            </div>
+            <div className="mt-5 flex justify-around">
+              <button
+                onClick={() => {
+                  setAddPulseOpen(false);
+                  setTextPulseOpen(true);
+                }}
+                className="flex flex-col items-center gap-2"
+              >
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">Aa</span>
+                <span className="text-xs text-hub-textDim">Text</span>
+              </button>
+              <button
+                onClick={() => {
+                  setAddPulseOpen(false);
+                  pulseFileInputRef.current?.click();
+                }}
+                className="flex flex-col items-center gap-2"
+              >
+                <span className="flex h-14 w-14 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">📷</span>
+                <span className="text-xs text-hub-textDim">Photo/Video</span>
+              </button>
+            </div>
+            <p className="mt-5 text-center text-[11px] text-hub-textDim">
+              Photo/Video opens your phone&apos;s own picker — a full in-app gallery browser isn&apos;t possible from a website.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {textPulseOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: textPulseColor }}>
+          <div className="flex items-center justify-between p-4">
+            <button onClick={() => setTextPulseOpen(false)} className="text-white">✕</button>
+            <button
+              onClick={() => postTextPulse(textPulseDraft, textPulseColor)}
+              disabled={uploadingPulse || !textPulseDraft.trim()}
+              className="rounded-full bg-white/20 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            >
+              {uploadingPulse ? "Posting..." : "Post"}
+            </button>
+          </div>
+          <div className="flex flex-1 items-center justify-center px-8">
+            <textarea
+              value={textPulseDraft}
+              onChange={(e) => setTextPulseDraft(e.target.value.slice(0, 120))}
+              placeholder="Type a status..."
+              autoFocus
+              rows={4}
+              className="w-full resize-none bg-transparent text-center text-2xl font-medium text-white placeholder:text-white/60 outline-none"
+            />
+          </div>
+          <div className="flex justify-center gap-3 p-6">
+            {TEXT_PULSE_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setTextPulseColor(c)}
+                className={`h-8 w-8 rounded-full border-2 ${textPulseColor === c ? "border-white" : "border-transparent"}`}
+                style={{ backgroundColor: c }}
+              />
+            ))}
           </div>
         </div>
       )}
