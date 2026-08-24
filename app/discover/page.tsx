@@ -101,7 +101,6 @@ type FollowingSubTab = (typeof followingSubTabs)[number];
 const PEOPLE_PAGE_SIZE = 10;
 const PULSE_ITEM_DURATION_MS = 5000;
 const TEXT_PULSE_COLORS = ["#2F6FED", "#E1306C", "#25D366", "#7C3AED", "#F59E0B", "#0EA5E9", "#111827"];
-const PULSE_REACTIONS = ["❤️", "😂", "👏", "🔥", "👍"];
 
 function keyFor(source: Source, id: string) {
   return `${source}-${id}`;
@@ -200,6 +199,7 @@ export default function DiscoverPage() {
   const [mediaComposerFile, setMediaComposerFile] = useState<File | null>(null);
   const [mediaComposerPreview, setMediaComposerPreview] = useState<string | null>(null);
   const [mediaComposerCaption, setMediaComposerCaption] = useState("");
+  const [rotatingMedia, setRotatingMedia] = useState(false);
 
   const [voicePulseOpen, setVoicePulseOpen] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -224,6 +224,7 @@ export default function DiscoverPage() {
   const [viewerProgress, setViewerProgress] = useState(0);
   const [viewerPaused, setViewerPaused] = useState(false);
   const [viewerReplyDraft, setViewerReplyDraft] = useState("");
+  const [pulseLikedIds, setPulseLikedIds] = useState<Set<string>>(new Set());
   const viewerTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [myPulseViewersOpen, setMyPulseViewersOpen] = useState(false);
@@ -544,6 +545,36 @@ export default function DiscoverPage() {
     setMediaComposerCaption("");
   }
 
+  async function rotateMediaComposerImage() {
+    if (!mediaComposerFile || mediaComposerFile.type.startsWith("video")) return;
+    setRotatingMedia(true);
+    try {
+      const url = URL.createObjectURL(mediaComposerFile);
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = reject;
+        img.src = url;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = img.height;
+      canvas.height = img.width;
+      const ctx = canvas.getContext("2d");
+      URL.revokeObjectURL(url);
+      if (!ctx) return;
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      const blob: Blob | null = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), mediaComposerFile.type || "image/jpeg", 0.92));
+      if (!blob) return;
+      const rotated = new File([blob], mediaComposerFile.name, { type: mediaComposerFile.type || "image/jpeg" });
+      setMediaComposerFile(rotated);
+      setMediaComposerPreview(URL.createObjectURL(rotated));
+    } finally {
+      setRotatingMedia(false);
+    }
+  }
+
   function requestShare(kind: "media" | "text" | "voice") {
     setPendingPulse({ kind });
     setShareConfirmOpen(true);
@@ -692,8 +723,10 @@ export default function DiscoverPage() {
     setViewerItemIndex(0);
     setViewerPaused(false);
     setViewerOpen(true);
-    markViewed(pulseGroups[groupIndex]?.items[0]?.id);
-    if (pulseGroups[groupIndex]?.isMine) loadMyPulseViewers(pulseGroups[groupIndex].items[0]?.id);
+    const firstItemId = pulseGroups[groupIndex]?.items[0]?.id;
+    markViewed(firstItemId);
+    loadPulseLikeStatus(firstItemId);
+    if (pulseGroups[groupIndex]?.isMine) loadMyPulseViewers(firstItemId);
   }
 
   function closeViewer() {
@@ -703,6 +736,33 @@ export default function DiscoverPage() {
   async function markViewed(pulseId: string | undefined) {
     if (!pulseId || !userId) return;
     await supabase.from("pulse_views").upsert({ pulse_id: pulseId, viewer_id: userId }, { onConflict: "pulse_id,viewer_id" });
+  }
+
+  async function loadPulseLikeStatus(pulseId: string | undefined) {
+    if (!pulseId || !userId) return;
+    const { data } = await supabase.from("pulse_reactions").select("id").eq("pulse_id", pulseId).eq("user_id", userId).maybeSingle();
+    setPulseLikedIds((prev) => {
+      const next = new Set(prev);
+      if (data) next.add(pulseId);
+      else next.delete(pulseId);
+      return next;
+    });
+  }
+
+  async function togglePulseLike(pulseId: string) {
+    if (!userId) return;
+    const isLiked = pulseLikedIds.has(pulseId);
+    setPulseLikedIds((prev) => {
+      const next = new Set(prev);
+      if (isLiked) next.delete(pulseId);
+      else next.add(pulseId);
+      return next;
+    });
+    if (isLiked) {
+      await supabase.from("pulse_reactions").delete().eq("pulse_id", pulseId).eq("user_id", userId);
+    } else {
+      await supabase.from("pulse_reactions").upsert({ pulse_id: pulseId, user_id: userId, emoji: "❤️" }, { onConflict: "pulse_id,user_id" });
+    }
   }
 
   async function loadMyPulseViewers(pulseId: string | undefined) {
@@ -728,14 +788,18 @@ export default function DiscoverPage() {
     if (viewerItemIndex < group.items.length - 1) {
       const nextIndex = viewerItemIndex + 1;
       setViewerItemIndex(nextIndex);
-      markViewed(group.items[nextIndex]?.id);
-      if (group.isMine) loadMyPulseViewers(group.items[nextIndex]?.id);
+      const id = group.items[nextIndex]?.id;
+      markViewed(id);
+      loadPulseLikeStatus(id);
+      if (group.isMine) loadMyPulseViewers(id);
     } else if (viewerGroupIndex < pulseGroups.length - 1) {
       const nextGroup = viewerGroupIndex + 1;
       setViewerGroupIndex(nextGroup);
       setViewerItemIndex(0);
-      markViewed(pulseGroups[nextGroup]?.items[0]?.id);
-      if (pulseGroups[nextGroup]?.isMine) loadMyPulseViewers(pulseGroups[nextGroup].items[0]?.id);
+      const id = pulseGroups[nextGroup]?.items[0]?.id;
+      markViewed(id);
+      loadPulseLikeStatus(id);
+      if (pulseGroups[nextGroup]?.isMine) loadMyPulseViewers(id);
     } else {
       closeViewer();
     }
@@ -745,17 +809,16 @@ export default function DiscoverPage() {
     const group = pulseGroups[viewerGroupIndex];
     if (!group) return;
     if (viewerItemIndex > 0) {
-      setViewerItemIndex(viewerItemIndex - 1);
+      const prevIndex = viewerItemIndex - 1;
+      setViewerItemIndex(prevIndex);
+      loadPulseLikeStatus(group.items[prevIndex]?.id);
     } else if (viewerGroupIndex > 0) {
       const prevGroup = viewerGroupIndex - 1;
+      const lastIdx = pulseGroups[prevGroup].items.length - 1;
       setViewerGroupIndex(prevGroup);
-      setViewerItemIndex(pulseGroups[prevGroup].items.length - 1);
+      setViewerItemIndex(lastIdx);
+      loadPulseLikeStatus(pulseGroups[prevGroup].items[lastIdx]?.id);
     }
-  }
-
-  async function reactToPulse(pulseId: string, emoji: string) {
-    if (!userId) return;
-    await supabase.from("pulse_reactions").upsert({ pulse_id: pulseId, user_id: userId, emoji }, { onConflict: "pulse_id,user_id" });
   }
 
   async function sendPulseReply(pulseId: string) {
@@ -1362,9 +1425,9 @@ export default function DiscoverPage() {
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); setAddPulseOpen(true); }}
-                        className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-hub-accentLight text-xs text-white border-2 border-hub-bg"
+                        className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-hub-accentLight text-white border-2 border-hub-bg"
                       >
-                        {uploadingPulse ? "..." : "+"}
+                        {uploadingPulse ? <span className="text-[9px]">...</span> : <PlusIcon />}
                       </button>
                     </div>
                     <div>
@@ -1429,7 +1492,7 @@ export default function DiscoverPage() {
             <div className="flex items-center gap-2 rounded-full border border-hub-border bg-hub-card px-3 py-2">
               <SearchIcon />
               <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }} placeholder="Search posts..." className="flex-1 bg-transparent text-sm text-white placeholder:text-hub-textDim outline-none" />
-              {searchQuery && <button onClick={() => { setSearchQuery(""); setSearchResults(null); }} className="text-hub-textDim">×</button>}
+              {searchQuery && <button onClick={() => { setSearchQuery(""); setSearchResults(null); }} className="text-hub-textDim"><CloseIcon small /></button>}
             </div>
           </div>
 
@@ -1495,27 +1558,27 @@ export default function DiscoverPage() {
           <div onClick={(e) => e.stopPropagation()} className="w-full rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
             <div className="flex items-center justify-between">
               <p className="text-base font-semibold text-white">Add Pulse</p>
-              <button onClick={() => setAddPulseOpen(false)} className="text-hub-textDim">✕</button>
+              <button onClick={() => setAddPulseOpen(false)} className="text-hub-textDim"><CloseIcon /></button>
             </div>
             <div className="mt-4 flex flex-col gap-1">
               <button onClick={() => { setAddPulseOpen(false); pulseCameraInputRef.current?.click(); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">📷</span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><CameraIcon /></span>
                 <div><p className="text-sm font-medium text-white">Camera</p><p className="text-xs text-hub-textDim">Take a photo or video</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); pulseFileInputRef.current?.click(); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">🖼️</span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><GalleryIcon /></span>
                 <div><p className="text-sm font-medium text-white">Photo/Video</p><p className="text-xs text-hub-textDim">Choose from your gallery</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); setTextPulseOpen(true); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">Aa</span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-base font-semibold text-white">Aa</span>
                 <div><p className="text-sm font-medium text-white">Text</p><p className="text-xs text-hub-textDim">Create a text Pulse</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); setVoicePulseOpen(true); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
-                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white">🎤</span>
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><MicIcon /></span>
                 <div><p className="text-sm font-medium text-white">Voice</p><p className="text-xs text-hub-textDim">Record a voice Pulse</p></div>
               </button>
             </div>
-            <p className="mt-4 flex items-center justify-center gap-1 text-center text-[11px] text-hub-textDim">🔒 Your Pulse will disappear after 24 hours.</p>
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px] text-hub-textDim"><LockIcon small /> Your Pulse will disappear after 24 hours.</p>
           </div>
         </div>
       )}
@@ -1524,7 +1587,16 @@ export default function DiscoverPage() {
       {mediaComposerFile && mediaComposerPreview && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black">
           <div className="flex items-center justify-between p-4">
-            <button onClick={() => { setMediaComposerFile(null); setMediaComposerPreview(null); }} className="text-white text-lg">✕</button>
+            <button onClick={() => { setMediaComposerFile(null); setMediaComposerPreview(null); }} className="text-white"><CloseIcon /></button>
+            <div className="flex items-center gap-4 text-white">
+              {!mediaComposerFile.type.startsWith("video") && (
+                <button onClick={rotateMediaComposerImage} disabled={rotatingMedia}><RotateIcon /></button>
+              )}
+              <button onClick={() => alert("Crop is coming in a future update.")}><CropIcon /></button>
+              <button onClick={() => alert("Text overlay is coming in a future update.")} className="text-base font-semibold">Aa</button>
+              <button onClick={() => alert("Drawing is coming in a future update.")}><PencilIcon /></button>
+              <button onClick={() => setMenuOpenFor(menuOpenFor === "pulse-more" ? null : "pulse-more")}><MoreDotsIcon /></button>
+            </div>
           </div>
           <div className="flex-1 flex items-center justify-center">
             {mediaComposerFile.type.startsWith("video") ? (
@@ -1533,16 +1605,19 @@ export default function DiscoverPage() {
               <img src={mediaComposerPreview} alt="" className="max-h-full max-w-full object-contain" />
             )}
           </div>
-          <div className="flex items-center gap-2 p-4">
-            <input
-              value={mediaComposerCaption}
-              onChange={(e) => setMediaComposerCaption(e.target.value)}
-              placeholder="Add a caption..."
-              className="flex-1 rounded-full bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/50 outline-none"
-            />
-            <button onClick={() => requestShare("media")} disabled={uploadingPulse} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50">
-              {uploadingPulse ? "..." : "➤"}
-            </button>
+          <div className="p-4">
+            <div className="flex items-center gap-2">
+              <input
+                value={mediaComposerCaption}
+                onChange={(e) => setMediaComposerCaption(e.target.value)}
+                placeholder="Add a caption..."
+                className="flex-1 rounded-full bg-white/10 px-4 py-2.5 text-sm text-white placeholder:text-white/50 outline-none"
+              />
+              <button onClick={() => requestShare("media")} disabled={uploadingPulse} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-hub-accentLight text-white disabled:opacity-50">
+                {uploadingPulse ? "..." : <SendIcon />}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-white/50">Status (Everyone)</p>
           </div>
         </div>
       )}
@@ -1551,9 +1626,9 @@ export default function DiscoverPage() {
       {textPulseOpen && (
         <div className="fixed inset-0 z-50 flex flex-col" style={{ backgroundColor: textPulseColor }}>
           <div className="flex items-center justify-between p-4">
-            <button onClick={() => setTextPulseOpen(false)} className="text-white">✕</button>
-            <button onClick={() => requestShare("text")} disabled={uploadingPulse || !textPulseDraft.trim()} className="rounded-full bg-white/20 px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40">
-              {uploadingPulse ? "Posting..." : "Post"}
+            <button onClick={() => setTextPulseOpen(false)} className="text-white"><CloseIcon /></button>
+            <button onClick={() => requestShare("text")} disabled={uploadingPulse || !textPulseDraft.trim()} className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white disabled:opacity-40">
+              {uploadingPulse ? "..." : <SendIcon />}
             </button>
           </div>
           <div className="flex flex-1 items-center justify-center px-8">
@@ -1578,7 +1653,7 @@ export default function DiscoverPage() {
       {voicePulseOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-hub-bg">
           <div className="flex items-center justify-between p-4">
-            <button onClick={() => { setVoicePulseOpen(false); setRecordedBlob(null); setRecordSeconds(0); }} className="text-white">✕</button>
+            <button onClick={() => { setVoicePulseOpen(false); setRecordedBlob(null); setRecordSeconds(0); }} className="text-white"><CloseIcon /></button>
             <p className="text-sm font-medium text-white">Voice Pulse</p>
             <span className="w-5" />
           </div>
@@ -1587,7 +1662,7 @@ export default function DiscoverPage() {
               onClick={recording ? stopRecording : startRecording}
               className={`flex h-28 w-28 items-center justify-center rounded-full border-4 ${recording ? "border-red-400" : "border-hub-accentLight"}`}
             >
-              <span className="text-3xl">🎤</span>
+              <MicIcon large />
             </button>
             <p className="text-2xl font-semibold text-white">{formatDuration(recordSeconds)}</p>
             <p className="text-xs text-hub-textDim">{recording ? "Recording... tap to stop" : recordedBlob ? "Recorded — ready to post" : "Tap to record"}</p>
@@ -1625,7 +1700,7 @@ export default function DiscoverPage() {
       {shareSuccessOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-hub-card p-6 text-center">
-            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border-2 border-green-400 text-2xl text-green-400">✓</div>
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border-2 border-green-400 text-green-400"><CheckIcon /></div>
             <p className="text-base font-semibold text-white">Pulse posted successfully</p>
             <p className="mt-1 text-xs text-hub-textDim">Your Pulse is now visible to your selected audience.</p>
             <button onClick={() => setShareSuccessOpen(false)} className="mt-5 w-full rounded-full bg-hub-accentLight py-2.5 text-sm font-medium text-white">Done</button>
@@ -1652,7 +1727,7 @@ export default function DiscoverPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-3 text-[11px] text-hub-textDim">🔒 Your selection will be used for future Pulse updates.</p>
+            <p className="mt-3 flex items-center gap-1.5 text-[11px] text-hub-textDim"><LockIcon small /> Your selection will be used for future Pulse updates.</p>
             <button onClick={savePulsePrivacy} disabled={savingPrivacy} className="mt-4 w-full rounded-full bg-hub-accentLight py-2.5 text-sm font-medium text-white disabled:opacity-50">
               {savingPrivacy ? "Saving..." : "Save"}
             </button>
@@ -1714,11 +1789,11 @@ export default function DiscoverPage() {
               <span className="text-sm font-medium text-white">{activeViewerGroup.isMine ? "My Pulse" : activeViewerGroup.first_name}</span>
               <span className="text-xs text-white/60">{timeAgo(activeViewerItem.created_at)}</span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 text-white">
               {activeViewerGroup.isMine && (
-                <button onClick={() => setDeletePulseTarget(activeViewerItem)} className="text-white text-lg">🗑️</button>
+                <button onClick={() => setDeletePulseTarget(activeViewerItem)}><TrashIcon /></button>
               )}
-              <button onClick={closeViewer} className="text-white"><CloseIcon /></button>
+              <button onClick={closeViewer}><CloseIcon /></button>
             </div>
           </div>
 
@@ -1747,20 +1822,23 @@ export default function DiscoverPage() {
 
           {activeViewerGroup.isMine ? (
             <button onClick={() => loadMyPulseViewers(activeViewerItem.id).then(() => setMyPulseViewersOpen(true))} className="flex items-center justify-center gap-2 border-t border-white/10 py-3 text-sm text-white">
-              👁 {myPulseViewers.length} views
+              <EyeIcon /> {myPulseViewers.length} views
             </button>
           ) : (
-            <div className="flex items-center gap-2 border-t border-white/10 px-4 py-3">
-              <input
-                value={viewerReplyDraft}
-                onChange={(e) => setViewerReplyDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") sendPulseReply(activeViewerItem.id); }}
-                placeholder="Reply to this Pulse..."
-                className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm text-white placeholder:text-white/50 outline-none"
-              />
-              {PULSE_REACTIONS.map((emoji) => (
-                <button key={emoji} onClick={() => reactToPulse(activeViewerItem.id, emoji)} className="text-xl">{emoji}</button>
-              ))}
+            <div>
+              <p className="px-4 pt-2 text-center text-[11px] text-white/50">Swipe up to reply</p>
+              <div className="flex items-center gap-3 border-t border-white/10 px-4 py-3">
+                <input
+                  value={viewerReplyDraft}
+                  onChange={(e) => setViewerReplyDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") sendPulseReply(activeViewerItem.id); }}
+                  placeholder="Reply to this Pulse..."
+                  className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm text-white placeholder:text-white/50 outline-none"
+                />
+                <button onClick={() => togglePulseLike(activeViewerItem.id)} className={pulseLikedIds.has(activeViewerItem.id) ? "text-red-500" : "text-white"}>
+                  <HeartIcon filled={pulseLikedIds.has(activeViewerItem.id)} />
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1779,10 +1857,130 @@ function SearchIcon() {
     </svg>
   );
 }
-function CloseIcon() {
+function CloseIcon({ small }: { small?: boolean }) {
+  const s = small ? 16 : 20;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function PlusIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CameraIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-white">
+      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 7l1.5-2.5h5L16 7" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="13.5" r="3.4" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+function GalleryIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-white">
+      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="9" cy="10" r="1.6" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3 16l5-5 4 4 3-3 6 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function MicIcon({ large }: { large?: boolean }) {
+  const s = large ? 32 : 22;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" className="text-white">
+      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+function LockIcon({ small }: { small?: boolean }) {
+  const s = small ? 12 : 16;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
+      <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+function RotateIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M4 12a8 8 0 0113.66-5.66L21 9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M21 4v5h-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M20 12a8 8 0 01-13.66 5.66L3 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M3 20v-5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CropIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M6 2v14a2 2 0 002 2h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M18 22V8a2 2 0 00-2-2H2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function PencilIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M12 20h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function MoreDotsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
+function SendIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M4 12l16-8-6 16-3-7-7-1z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+      <path d="M5 12l5 5L20 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+      <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function EyeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+function HeartIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
+      <path
+        d="M12 20s-7-4.35-9.5-8.5C.7 8 2.5 4.5 6 4.5c2 0 3.5 1.2 6 3.5 2.5-2.3 4-3.5 6-3.5 3.5 0 5.3 3.5 3.5 7C19 15.65 12 20 12 20z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
