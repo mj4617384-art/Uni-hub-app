@@ -238,6 +238,7 @@ export default function DiscoverPage() {
         entries.forEach((entry) => {
           const video = entry.target as HTMLVideoElement;
           if (!entry.isIntersecting || entry.intersectionRatio < 0.5) video.pause();
+          else video.play().catch(() => {});
         });
       },
       { threshold: [0, 0.5, 1] }
@@ -1136,6 +1137,9 @@ export default function DiscoverPage() {
     if (post.source === "discover" && !error) {
       await supabase.from("discover_feed_items").delete().eq("source_type", "discover_post").eq("source_id", post.id);
     }
+    if (post.source === "sports" && !error) {
+      await supabase.from("discover_feed_items").delete().eq("source_type", "sports_update").eq("source_id", post.id);
+    }
     setDeletingKey(null);
     setMenuOpenFor(null);
     if (error) {
@@ -1290,6 +1294,144 @@ export default function DiscoverPage() {
     );
   }
 
+  // --- Full-screen Reels-style card, used for the "For You" feed ---
+  function renderReelCard(post: UnifiedPost) {
+    const k = keyFor(post.source, post.id);
+    const postReactions = reactionsByKey[k] || [];
+    const myReaction = postReactions.find((r) => r.user_id === userId)?.type ?? null;
+    const allComments = commentsByKey[k] || [];
+    const topLevel = allComments.filter((c) => !c.parent_id);
+    const currentReply = replyTo[k];
+    const isMine = post.user_id === userId;
+    const isSaved = post.source === "discover" && bookmarkedIds.has(post.id);
+    const isVideo = post.video_urls.length > 0;
+    const heroMedia = post.video_urls[0] || post.image_urls[0] || null;
+
+    return (
+      <div key={k} className="relative h-full w-full snap-start shrink-0 overflow-hidden bg-black">
+        {heroMedia ? (
+          isVideo ? (
+            <video
+              ref={registerVideoRef}
+              src={heroMedia}
+              muted
+              loop
+              playsInline
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <img src={heroMedia} alt="" className="h-full w-full object-cover" />
+          )
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-hub-card2 px-8 text-center text-sm text-white/80">
+            {post.text || post.description || ""}
+          </div>
+        )}
+
+        {/* top overlay: avatar, name, timestamp, menu */}
+        <div className="absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/70 to-transparent px-4 pb-10 pt-4">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-white/40 bg-hub-card2 flex items-center justify-center text-xs font-medium text-white">
+              {post.avatar_url ? <img src={post.avatar_url} alt="" className="h-full w-full object-cover" /> : post.first_name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">{post.first_name}</p>
+              <p className="text-[11px] text-white/70">{timeAgo(post.created_at)}{post.category ? ` · ${post.category}` : ""}</p>
+            </div>
+          </div>
+          <div ref={(el) => { menuScopeRefs.current[k] = el; }} className="relative">
+            <button onClick={() => setMenuOpenFor(menuOpenFor === k ? null : k)} className="text-white"><MoreIcon /></button>
+            {menuOpenFor === k && (
+              <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
+                <button onClick={() => sharePost(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"><ShareIcon />Share</button>
+                <button onClick={() => copyLink(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white">Copy link</button>
+                {isMine && (
+                  <>
+                    <div className="my-1 border-t border-hub-border" />
+                    <button onClick={() => handleDeletePost(post)} disabled={deletingKey === k} className="block w-full px-3 py-2 text-left text-xs text-red-400 disabled:opacity-40">
+                      {deletingKey === k ? "Deleting..." : "Delete post"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* right action column */}
+        <div className="absolute bottom-24 right-3 flex flex-col items-center gap-6">
+          <button onClick={() => pickReaction(post, "like")} disabled={reactingKey === k} className="flex flex-col items-center gap-1">
+            <ThumbsUpIcon className={myReaction ? "text-hub-accentLight" : "text-white"} filled={!!myReaction} />
+            <span className="text-[13px] font-medium text-white">{postReactions.length > 0 ? postReactions.length : ""}</span>
+          </button>
+          <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex flex-col items-center gap-1">
+            <CommentIcon className="text-white" />
+            <span className="text-[13px] font-medium text-white">{allComments.length > 0 ? allComments.length : ""}</span>
+          </button>
+          <button onClick={() => sharePost(post)} className="flex flex-col items-center gap-1">
+            <ShareIcon className="text-white" />
+          </button>
+          {post.source === "discover" && (
+            <button onClick={() => toggleBookmark(post)} className="flex flex-col items-center gap-1">
+              <BookmarkIcon className={isSaved ? "text-hub-accentLight" : "text-white"} filled={isSaved} />
+            </button>
+          )}
+        </div>
+
+        {/* bottom caption */}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-14">
+          <p className="pr-14 text-sm font-semibold text-white">{post.first_name}</p>
+          {(post.text || post.description) && (
+            <p className="mt-0.5 line-clamp-2 pr-14 text-[13px] text-white/90 whitespace-pre-wrap">
+              {linkifyContent(post.text || post.description || "")}
+            </p>
+          )}
+        </div>
+
+        {/* comments bottom sheet, reel style */}
+        {commentOpenFor === k && (
+          <div className="absolute inset-0 z-40 flex items-end bg-black/60" onClick={() => setCommentOpenFor(null)}>
+            <div onClick={(e) => e.stopPropagation()} className="max-h-[65%] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-4">
+              <p className="mb-3 text-sm font-semibold text-white">Comments</p>
+              <div className="flex flex-col gap-3">
+                {topLevel.length === 0 && <p className="text-xs text-hub-textDim">No comments yet.</p>}
+                {topLevel.map((c) => (
+                  <CommentRow
+                    key={c.id}
+                    comment={c}
+                    liked={!!commentLikes[c.id]?.mine}
+                    likeCount={commentLikes[c.id]?.count ?? 0}
+                    onLike={() => toggleCommentLike(post, c.id)}
+                    onReply={() => startReply(post, c.id, c.first_name || "them")}
+                  />
+                ))}
+              </div>
+              {currentReply && (
+                <div className="mt-2 flex items-center justify-between rounded-md bg-hub-card2 px-2.5 py-1 text-[11px] text-hub-textDim">
+                  <span>Replying to {currentReply.name}</span>
+                  <button onClick={() => cancelReply(k)} className="text-hub-accentLight">Cancel</button>
+                </div>
+              )}
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  ref={(el) => { commentInputRefs.current[k] = el; }}
+                  value={commentDraft[k] || ""}
+                  onChange={(e) => setCommentDraft((prev) => ({ ...prev, [k]: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitComment(post); }}
+                  placeholder={currentReply ? `Reply to ${currentReply.name}...` : "Write a comment..."}
+                  className="flex-1 rounded-full border border-hub-border bg-hub-card2 px-3 py-1.5 text-xs text-white placeholder:text-hub-textDim outline-none"
+                />
+                <button onClick={() => submitComment(post)} disabled={commentPosting === k || !(commentDraft[k] || "").trim()} className="shrink-0 text-xs font-medium text-hub-accentLight disabled:opacity-40">
+                  {commentPosting === k ? "..." : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function renderPersonRow(person: Person) {
     const isFollowing = followingIds.has(person.id);
     return (
@@ -1343,12 +1485,14 @@ export default function DiscoverPage() {
           ))}
         </div>
 
-        <button onClick={() => router.push("/profile")} className="mt-4 flex w-full items-center gap-3 rounded-full border border-hub-border bg-hub-card px-3 py-2.5 text-left">
-          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-            {myAvatarUrl ? <img src={myAvatarUrl} alt="" className="h-full w-full object-cover" /> : myFirstName?.charAt(0).toUpperCase() ?? "U"}
-          </div>
-          <span className="text-sm text-hub-textDim">Share something from your Profile...</span>
-        </button>
+        {activeTab !== "For You" && (
+          <button onClick={() => router.push("/profile")} className="mt-4 flex w-full items-center gap-3 rounded-full border border-hub-border bg-hub-card px-3 py-2.5 text-left">
+            <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
+              {myAvatarUrl ? <img src={myAvatarUrl} alt="" className="h-full w-full object-cover" /> : myFirstName?.charAt(0).toUpperCase() ?? "U"}
+            </div>
+            <span className="text-sm text-hub-textDim">Share something from your Profile...</span>
+          </button>
+        )}
       </div>
 
       {activeTab === "For You" && (
@@ -1357,7 +1501,11 @@ export default function DiscoverPage() {
           {!forYouLoading && forYouPosts && forYouPosts.length === 0 && (
             <p className="px-5 py-6 text-center text-sm text-hub-textDim">Nothing here yet — post something from your Profile to get started.</p>
           )}
-          {!forYouLoading && (forYouPosts ?? []).map(renderPostCard)}
+          {!forYouLoading && forYouPosts && forYouPosts.length > 0 && (
+            <div className="h-[calc(100dvh-172px)] min-h-[420px] w-full snap-y snap-mandatory overflow-y-scroll [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {forYouPosts.map(renderReelCard)}
+            </div>
+          )}
         </div>
       )}
 
@@ -1425,7 +1573,7 @@ export default function DiscoverPage() {
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); setAddPulseOpen(true); }}
-                        className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-hub-accentLight text-white border-2 border-hub-bg"
+                        className="absolute bottom-0 right-0 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-hub-accentLight text-white border-2 border-hub-bg"
                       >
                         {uploadingPulse ? <span className="text-[9px]">...</span> : <PlusIcon />}
                       </button>
@@ -1441,7 +1589,7 @@ export default function DiscoverPage() {
                       <p className="px-5 pb-2 text-xs font-medium text-hub-textDim">Recent updates</p>
                       {newUpdates.map((group) => (
                         <button key={group.user_id} onClick={() => openViewer(pulseGroups.findIndex((g) => g.user_id === group.user_id))} className="flex w-full items-center gap-3 border-b border-hub-border px-5 py-3 text-left">
-                          <div className="h-12 w-12 shrink-0 rounded-full p-[2px] bg-gradient-to-tr from-hub-accentLight to-purple-400">
+                          <div className="h-[52px] w-[52px] shrink-0 rounded-full p-[2px] bg-gradient-to-tr from-hub-accentLight to-purple-400">
                             <div className="h-full w-full overflow-hidden rounded-full border-2 border-hub-bg bg-hub-card2 flex items-center justify-center text-xs font-medium text-white">
                               {group.avatar_url ? <img src={group.avatar_url} alt="" className="h-full w-full object-cover" /> : group.first_name.charAt(0).toUpperCase()}
                             </div>
@@ -1460,7 +1608,7 @@ export default function DiscoverPage() {
                       <p className="px-5 py-2 text-xs font-medium text-hub-textDim">Viewed updates</p>
                       {viewedUpdates.map((group) => (
                         <button key={group.user_id} onClick={() => openViewer(pulseGroups.findIndex((g) => g.user_id === group.user_id))} className="flex w-full items-center gap-3 border-b border-hub-border px-5 py-3 text-left">
-                          <div className="h-12 w-12 shrink-0 rounded-full border-2 border-hub-border overflow-hidden bg-hub-card2 flex items-center justify-center text-xs font-medium text-white">
+                          <div className="h-[52px] w-[52px] shrink-0 rounded-full border-2 border-hub-border overflow-hidden bg-hub-card2 flex items-center justify-center text-xs font-medium text-white">
                             {group.avatar_url ? <img src={group.avatar_url} alt="" className="h-full w-full object-cover" /> : group.first_name.charAt(0).toUpperCase()}
                           </div>
                           <div>
@@ -1563,19 +1711,19 @@ export default function DiscoverPage() {
             <div className="mt-4 flex flex-col gap-1">
               <button onClick={() => { setAddPulseOpen(false); pulseCameraInputRef.current?.click(); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><CameraIcon /></span>
-                <div><p className="text-sm font-medium text-white">Camera</p><p className="text-xs text-hub-textDim">Take a photo or video</p></div>
+                <div><p className="text-[15px] font-medium text-white">Camera</p><p className="text-xs text-hub-textDim">Take a photo or video</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); pulseFileInputRef.current?.click(); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><GalleryIcon /></span>
-                <div><p className="text-sm font-medium text-white">Photo/Video</p><p className="text-xs text-hub-textDim">Choose from your gallery</p></div>
+                <div><p className="text-[15px] font-medium text-white">Photo/Video</p><p className="text-xs text-hub-textDim">Choose from your gallery</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); setTextPulseOpen(true); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-base font-semibold text-white">Aa</span>
-                <div><p className="text-sm font-medium text-white">Text</p><p className="text-xs text-hub-textDim">Create a text Pulse</p></div>
+                <div><p className="text-[15px] font-medium text-white">Text</p><p className="text-xs text-hub-textDim">Create a text Pulse</p></div>
               </button>
               <button onClick={() => { setAddPulseOpen(false); setVoicePulseOpen(true); }} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left">
                 <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-hub-card2 border border-hub-border text-white"><MicIcon /></span>
-                <div><p className="text-sm font-medium text-white">Voice</p><p className="text-xs text-hub-textDim">Record a voice Pulse</p></div>
+                <div><p className="text-[15px] font-medium text-white">Voice</p><p className="text-xs text-hub-textDim">Record a voice Pulse</p></div>
               </button>
             </div>
             <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px] text-hub-textDim"><LockIcon small /> Your Pulse will disappear after 24 hours.</p>
@@ -1660,7 +1808,7 @@ export default function DiscoverPage() {
           <div className="flex flex-1 flex-col items-center justify-center gap-6">
             <button
               onClick={recording ? stopRecording : startRecording}
-              className={`flex h-28 w-28 items-center justify-center rounded-full border-4 ${recording ? "border-red-400" : "border-hub-accentLight"}`}
+              className={`flex h-24 w-24 items-center justify-center rounded-full border-4 ${recording ? "border-red-400" : "border-hub-accentLight"}`}
             >
               <MicIcon large />
             </button>
@@ -1689,8 +1837,8 @@ export default function DiscoverPage() {
               <span className="text-white">24 hours</span>
             </div>
             <div className="mt-5 flex gap-3">
-              <button onClick={() => { setShareConfirmOpen(false); setPendingPulse(null); }} className="flex-1 rounded-full border border-hub-border py-2.5 text-sm font-medium text-white">Cancel</button>
-              <button onClick={confirmShare} className="flex-1 rounded-full bg-hub-accentLight py-2.5 text-sm font-medium text-white">Share Pulse</button>
+              <button onClick={() => { setShareConfirmOpen(false); setPendingPulse(null); }} className="flex-1 rounded-full border border-hub-border py-3 text-sm font-medium text-white">Cancel</button>
+              <button onClick={confirmShare} className="flex-1 rounded-full bg-hub-accentLight py-3 text-sm font-medium text-white">Share Pulse</button>
             </div>
           </div>
         </div>
@@ -1703,7 +1851,7 @@ export default function DiscoverPage() {
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full border-2 border-green-400 text-green-400"><CheckIcon /></div>
             <p className="text-base font-semibold text-white">Pulse posted successfully</p>
             <p className="mt-1 text-xs text-hub-textDim">Your Pulse is now visible to your selected audience.</p>
-            <button onClick={() => setShareSuccessOpen(false)} className="mt-5 w-full rounded-full bg-hub-accentLight py-2.5 text-sm font-medium text-white">Done</button>
+            <button onClick={() => setShareSuccessOpen(false)} className="mt-5 w-full rounded-full bg-hub-accentLight py-3 text-sm font-medium text-white">Done</button>
           </div>
         </div>
       )}
@@ -1722,13 +1870,13 @@ export default function DiscoverPage() {
                 { key: "hidden", label: "Hide From", desc: "Choose people who should not see your Pulse." },
               ].map((opt) => (
                 <button key={opt.key} onClick={() => setPulsePrivacy(opt.key)} className="flex items-start gap-3 rounded-lg px-2 py-2.5 text-left">
-                  <span className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 ${pulsePrivacy === opt.key ? "border-hub-accentLight bg-hub-accentLight" : "border-hub-border"}`} />
+                  <span className={`mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 ${pulsePrivacy === opt.key ? "border-hub-accentLight bg-hub-accentLight" : "border-hub-border"}`} />
                   <div><p className="text-sm text-white">{opt.label}</p><p className="text-xs text-hub-textDim">{opt.desc}</p></div>
                 </button>
               ))}
             </div>
             <p className="mt-3 flex items-center gap-1.5 text-[11px] text-hub-textDim"><LockIcon small /> Your selection will be used for future Pulse updates.</p>
-            <button onClick={savePulsePrivacy} disabled={savingPrivacy} className="mt-4 w-full rounded-full bg-hub-accentLight py-2.5 text-sm font-medium text-white disabled:opacity-50">
+            <button onClick={savePulsePrivacy} disabled={savingPrivacy} className="mt-4 w-full rounded-full bg-hub-accentLight py-3 text-sm font-medium text-white disabled:opacity-50">
               {savingPrivacy ? "Saving..." : "Save"}
             </button>
           </div>
@@ -1742,8 +1890,8 @@ export default function DiscoverPage() {
             <p className="text-base font-semibold text-white">Delete Pulse?</p>
             <p className="mt-1 text-xs text-hub-textDim">This Pulse will be removed for everyone.</p>
             <div className="mt-5 flex gap-3">
-              <button onClick={() => setDeletePulseTarget(null)} className="flex-1 rounded-full border border-hub-border py-2.5 text-sm font-medium text-white">Cancel</button>
-              <button onClick={confirmDeletePulse} className="flex-1 rounded-full bg-red-500 py-2.5 text-sm font-medium text-white">Delete</button>
+              <button onClick={() => setDeletePulseTarget(null)} className="flex-1 rounded-full border border-hub-border py-3 text-sm font-medium text-white">Cancel</button>
+              <button onClick={confirmDeletePulse} className="flex-1 rounded-full bg-red-500 py-3 text-sm font-medium text-white">Delete</button>
             </div>
           </div>
         </div>
@@ -1775,7 +1923,7 @@ export default function DiscoverPage() {
         <div className="fixed inset-0 z-50 flex flex-col bg-black">
           <div className="flex gap-1 px-3 pt-3">
             {activeViewerGroup.items.map((item, idx) => (
-              <div key={item.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/30">
+              <div key={item.id} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30">
                 <div className="h-full bg-white" style={{ width: idx < viewerItemIndex ? "100%" : idx === viewerItemIndex ? `${viewerProgress}%` : "0%" }} />
               </div>
             ))}
@@ -1833,154 +1981,4 @@ export default function DiscoverPage() {
                   onChange={(e) => setViewerReplyDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") sendPulseReply(activeViewerItem.id); }}
                   placeholder="Reply to this Pulse..."
-                  className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm text-white placeholder:text-white/50 outline-none"
-                />
-                <button onClick={() => togglePulseLike(activeViewerItem.id)} className={pulseLikedIds.has(activeViewerItem.id) ? "text-red-500" : "text-white"}>
-                  <HeartIcon filled={pulseLikedIds.has(activeViewerItem.id)} />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <BottomNav />
-    </main>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="shrink-0 text-hub-textDim">
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CloseIcon({ small }: { small?: boolean }) {
-  const s = small ? 16 : 20;
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  );
-}
-function CameraIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-white">
-      <rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M8 7l1.5-2.5h5L16 7" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <circle cx="12" cy="13.5" r="3.4" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
-}
-function GalleryIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="text-white">
-      <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="9" cy="10" r="1.6" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M3 16l5-5 4 4 3-3 6 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function MicIcon({ large }: { large?: boolean }) {
-  const s = large ? 32 : 22;
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" className="text-white">
-      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-function LockIcon({ small }: { small?: boolean }) {
-  const s = small ? 12 : 16;
-  return (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none">
-      <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8 10V7a4 4 0 018 0v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-function RotateIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M4 12a8 8 0 0113.66-5.66L21 9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M21 4v5h-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M20 12a8 8 0 01-13.66 5.66L3 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M3 20v-5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function CropIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M6 2v14a2 2 0 002 2h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M18 22V8a2 2 0 00-2-2H2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function PencilIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M12 20h9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      <path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function MoreDotsIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <circle cx="5" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="12" cy="12" r="1.6" fill="currentColor" />
-      <circle cx="19" cy="12" r="1.6" fill="currentColor" />
-    </svg>
-  );
-}
-function SendIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M4 12l16-8-6 16-3-7-7-1z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function CheckIcon() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12l5 5L20 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function TrashIcon() {
-  return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-      <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function EyeIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
-}
-function HeartIcon({ filled }: { filled?: boolean }) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}>
-      <path
-        d="M12 20s-7-4.35-9.5-8.5C.7 8 2.5 4.5 6 4.5c2 0 3.5 1.2 6 3.5 2.5-2.3 4-3.5 6-3.5 3.5 0 5.3 3.5 3.5 7C19 15.65 12 20 12 20z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+                  className="h-12 fle
