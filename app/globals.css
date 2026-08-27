@@ -4,14 +4,14 @@
 
 :root,
 [data-theme="dark"] {
-  --hub-bg: #080b12;
-  --hub-card: #12161f;
-  --hub-card2: #171c26;
-  --hub-border: #232a35;
+  --hub-bg: #0a0a0c;
+  --hub-card: #16161a;
+  --hub-card2: #1d1d22;
+  --hub-border: #2b2b31;
   --hub-accent: #2f6fed;
   --hub-accent-light: #4c8cff;
   --hub-text: #ffffff;
-  --hub-text-dim: #8fa3b5;
+  --hub-text-dim: #9a9aa1;
 }
 
 [data-theme="light"] {
