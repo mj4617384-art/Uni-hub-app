@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 type ThemePreference = "dark" | "light" | "system";
@@ -28,6 +28,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreference] = useState<ThemePreference>("dark");
   const [theme, setTheme] = useState<ResolvedTheme>("dark");
   const [userId, setUserId] = useState<string | null>(null);
+  // Tracks which user id we've already loaded a theme for, so background
+  // auth events (token refresh, etc.) don't re-trigger a DB reload and
+  // stomp a preference the user just picked.
+  const loadedForUserId = useRef<string | null>(null);
 
   function applyPreference(pref: ThemePreference) {
     const resolved = resolve(pref);
@@ -36,19 +40,23 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.setAttribute("data-theme", resolved);
   }
 
+  async function loadForUser(id: string) {
+    loadedForUserId.current = id;
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("theme_preference")
+      .eq("id", id)
+      .single();
+    if (error) {
+      console.error("Failed to load theme preference:", error);
+    }
+    const stored = (profile?.theme_preference as ThemePreference | null) ?? "dark";
+    applyPreference(stored);
+  }
+
   useEffect(() => {
     // Always paint dark first — no one's preference is known yet.
     document.documentElement.setAttribute("data-theme", "dark");
-
-    async function loadForUser(id: string) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("theme_preference")
-        .eq("id", id)
-        .single();
-      const stored = (profile?.theme_preference as ThemePreference | null) ?? "dark";
-      applyPreference(stored);
-    }
 
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
@@ -57,13 +65,22 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         setUserId(session.user.id);
-        loadForUser(session.user.id);
+        // Only reload from the DB on an actual sign-in for a *different*
+        // (or not-yet-loaded) user. Ignore TOKEN_REFRESHED / USER_UPDATED /
+        // other background events for the same user — those used to
+        // re-fetch and silently overwrite a theme the user had just toggled,
+        // especially if the write hadn't finished persisting yet.
+        if (loadedForUserId.current !== session.user.id) {
+          loadForUser(session.user.id);
+        }
       } else {
-        // Logged out — next person on this device should see the default, not the last user's pick.
+        // Logged out — next person on this device should see the default,
+        // not the last user's pick.
         setUserId(null);
+        loadedForUserId.current = null;
         applyPreference("dark");
       }
     });
@@ -98,7 +115,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function toggleTheme() {
-    // Manual toggle cycles between dark/light directly (existing behavior kept as-is)
     const next: ThemePreference = theme === "dark" ? "light" : "dark";
     applyPreference(next);
     await persistPreference(next);
