@@ -4,12 +4,12 @@
 
 :root,
 [data-theme="dark"] {
-  --hub-bg: #17212b;
-  --hub-card: #202b36;
-  --hub-card2: #263442;
-  --hub-border: #2e3a46;
-  --hub-accent: #2b5278;
-  --hub-accent-light: #229ed9;
+  --hub-bg: #080b12;
+  --hub-card: #12161f;
+  --hub-card2: #171c26;
+  --hub-border: #232a35;
+  --hub-accent: #229ed9;
+  --hub-accent-light: #2ea6e6;
   --hub-text: #ffffff;
   --hub-text-dim: #8fa3b5;
 }
