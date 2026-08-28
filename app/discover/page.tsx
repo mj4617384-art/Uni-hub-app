@@ -22,6 +22,128 @@ import {
   CommentRow,
 } from "@/lib/discover/shared";
 
+// --- Icons used on this page that were never defined/imported anywhere.
+// Simple stroke-style SVGs so the build compiles; restyle anytime. ---
+function CloseIcon({ className = "", small = false }: { className?: string; small?: boolean }) {
+  const s = small ? 14 : 20;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className}>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+function PlusIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className={className}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+function CameraIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+function GalleryIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="m4 17 5-5 3.5 3.5L18 10l2 2" />
+    </svg>
+  );
+}
+function MicIcon({ className = "", large = false }: { className?: string; large?: boolean }) {
+  const s = large ? 32 : 20;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
+  );
+}
+function LockIcon({ className = "", small = false }: { className?: string; small?: boolean }) {
+  const s = small ? 12 : 18;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+function RotateIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 4v5h5M20 20v-5h-5" />
+      <path d="M5.5 12a6.5 6.5 0 0 1 11-4.6L20 9M18.5 12a6.5 6.5 0 0 1-11 4.6L4 15" />
+    </svg>
+  );
+}
+function CropIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2" />
+    </svg>
+  );
+}
+function PencilIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m12 20 8-8-4-4-8 8v4Z" />
+      <path d="m14 6 4 4" />
+    </svg>
+  );
+}
+function MoreDotsIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <circle cx="5" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="19" cy="12" r="1.8" />
+    </svg>
+  );
+}
+function SendIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M3 12 21 3l-6 18-4-8-8-1Z" />
+    </svg>
+  );
+}
+function CheckIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M5 13l4 4 10-11" />
+    </svg>
+  );
+}
+function TrashIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" />
+    </svg>
+  );
+}
+function EyeIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+function SearchIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
 type Source = "discover" | "sports";
 
 type UnifiedPost = {
@@ -1891,94 +2013,4 @@ export default function DiscoverPage() {
             <p className="mt-1 text-xs text-hub-textDim">This Pulse will be removed for everyone.</p>
             <div className="mt-5 flex gap-3">
               <button onClick={() => setDeletePulseTarget(null)} className="flex-1 rounded-full border border-hub-border py-3 text-sm font-medium text-white">Cancel</button>
-              <button onClick={confirmDeletePulse} className="flex-1 rounded-full bg-red-500 py-3 text-sm font-medium text-white">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* My Pulse viewers sheet */}
-      {myPulseViewersOpen && (
-        <div className="fixed inset-0 z-[60] flex items-end bg-black/70" onClick={() => setMyPulseViewersOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl border-t border-hub-border bg-hub-card p-5">
-            <p className="text-sm font-semibold text-white">Viewed by ({myPulseViewers.length})</p>
-            <div className="mt-3 flex flex-col gap-3">
-              {myPulseViewers.length === 0 && <p className="text-xs text-hub-textDim">No views yet.</p>}
-              {myPulseViewers.map((v) => (
-                <div key={v.id} className="flex items-center gap-3">
-                  <div className="h-9 w-9 overflow-hidden rounded-full bg-hub-card2 border border-hub-border flex items-center justify-center text-xs font-medium text-white">
-                    {v.avatar_url ? <img src={v.avatar_url} alt="" className="h-full w-full object-cover" /> : v.first_name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1"><p className="text-sm text-white">{v.first_name}</p></div>
-                  <span className="text-[11px] text-hub-textDim">{timeAgo(v.viewed_at)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pulse viewer */}
-      {viewerOpen && activeViewerGroup && activeViewerItem && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black">
-          <div className="flex gap-1 px-3 pt-3">
-            {activeViewerGroup.items.map((item, idx) => (
-              <div key={item.id} className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30">
-                <div className="h-full bg-white" style={{ width: idx < viewerItemIndex ? "100%" : idx === viewerItemIndex ? `${viewerProgress}%` : "0%" }} />
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 overflow-hidden rounded-full bg-hub-card2 border border-white/20 flex items-center justify-center text-xs font-medium text-white">
-                {activeViewerGroup.avatar_url ? <img src={activeViewerGroup.avatar_url} alt="" className="h-full w-full object-cover" /> : activeViewerGroup.first_name.charAt(0).toUpperCase()}
-              </div>
-              <span className="text-sm font-medium text-white">{activeViewerGroup.isMine ? "My Pulse" : activeViewerGroup.first_name}</span>
-              <span className="text-xs text-white/60">{timeAgo(activeViewerItem.created_at)}</span>
-            </div>
-            <div className="flex items-center gap-3 text-white">
-              {activeViewerGroup.isMine && (
-                <button onClick={() => setDeletePulseTarget(activeViewerItem)}><TrashIcon /></button>
-              )}
-              <button onClick={closeViewer}><CloseIcon /></button>
-            </div>
-          </div>
-
-          <div
-            className="relative flex-1"
-            onMouseDown={() => setViewerPaused(true)}
-            onMouseUp={() => setViewerPaused(false)}
-            onTouchStart={() => setViewerPaused(true)}
-            onTouchEnd={() => setViewerPaused(false)}
-          >
-            {activeViewerItem.media_type === "video" ? (
-              <video key={activeViewerItem.id} src={activeViewerItem.media_url} autoPlay muted className="h-full w-full object-contain" />
-            ) : activeViewerItem.media_type === "voice" ? (
-              <div className="flex h-full w-full items-center justify-center">
-                <audio key={activeViewerItem.id} src={activeViewerItem.media_url} autoPlay controls className="w-4/5" />
-              </div>
-            ) : (
-              <img key={activeViewerItem.id} src={activeViewerItem.media_url} alt="" className="h-full w-full object-contain" />
-            )}
-            {activeViewerItem.caption && (
-              <p className="absolute bottom-4 left-0 right-0 px-6 text-center text-sm text-white">{activeViewerItem.caption}</p>
-            )}
-            <button onClick={goPrevItem} className="absolute left-0 top-0 h-full w-1/3" aria-label="Previous" />
-            <button onClick={goNextItem} className="absolute right-0 top-0 h-full w-1/3" aria-label="Next" />
-          </div>
-
-          {activeViewerGroup.isMine ? (
-            <button onClick={() => loadMyPulseViewers(activeViewerItem.id).then(() => setMyPulseViewersOpen(true))} className="flex items-center justify-center gap-2 border-t border-white/10 py-3 text-sm text-white">
-              <EyeIcon /> {myPulseViewers.length} views
-            </button>
-          ) : (
-            <div>
-              <p className="px-4 pt-2 text-center text-[11px] text-white/50">Swipe up to reply</p>
-              <div className="flex items-center gap-3 border-t border-white/10 px-4 py-3">
-                <input
-                  value={viewerReplyDraft}
-                  onChange={(e) => setViewerReplyDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") sendPulseReply(activeViewerItem.id); }}
-                  placeholder="Reply to this Pulse..."
-                  className="h-12 fle
+              <button onClick={confirmDeletePulse}
