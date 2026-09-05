@@ -467,15 +467,15 @@ export default function DiscoverPage() {
             <span className="text-[13px] font-medium text-white">{postReactions.length > 0 ? postReactions.length : ""}</span>
           </button>
           <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex flex-col items-center gap-1">
-            <CommentIcon className="text-white" />
+            <span className="text-white"><CommentIcon /></span>
             <span className="text-[13px] font-medium text-white">{allComments.length > 0 ? allComments.length : ""}</span>
           </button>
           <button onClick={() => sharePost(post)} className="flex flex-col items-center gap-1">
-            <ShareIcon className="text-white" />
+            <span className="text-white"><ShareIcon /></span>
           </button>
           {post.source === "discover" && (
             <button onClick={() => toggleBookmark(post)} className="flex flex-col items-center gap-1">
-              <BookmarkIcon className={isSaved ? "text-hub-accentLight" : "text-white"} filled={isSaved} />
+              <span className={isSaved ? "text-hub-accentLight" : "text-white"}><BookmarkIcon filled={isSaved} /></span>
             </button>
           )}
         </div>
