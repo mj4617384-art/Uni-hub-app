@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import CampusSkyline from "@/components/CampusSkyline";
 import { supabase } from "@/lib/supabaseClient";
 
 type Mode = "login" | "signup";
@@ -30,6 +29,7 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   // login
   const [email, setEmail] = useState("");
@@ -68,6 +68,17 @@ export default function AuthPage() {
       return;
     }
     router.push("/home");
+  }
+
+  async function handleGoogleAuth() {
+    setError(null);
+    setGoogleLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/home` },
+    });
+    setGoogleLoading(false);
+    if (error) setError(error.message);
   }
 
   function validateStep1() {
@@ -239,31 +250,28 @@ export default function AuthPage() {
   }
 
   return (
-    <main className="relative flex h-screen flex-col bg-hub-bg">
-      <div className="relative h-56 shrink-0 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-[#16244a] to-hub-bg" />
-        <CampusSkyline className="absolute bottom-0 h-32 w-full" />
+    <main className="flex h-screen flex-col bg-hub-bg">
+      <div className="flex items-center px-5 pt-4">
         <button
           onClick={() => router.back()}
-          aria-label="Close"
-          className="absolute left-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-black/30 text-white"
+          aria-label="Back"
+          className="flex h-9 w-9 items-center justify-center text-white"
         >
-          ✕
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto rounded-t-xl2 bg-hub-card px-6 pt-6 pb-8 -mt-6 relative">
+      <div className="flex-1 overflow-y-auto px-6 pb-8 pt-2">
         {mode === "login" ? (
           <>
-            <h2 className="text-2xl font-semibold">
-              Uni<span className="text-hub-accentLight">.hub</span> 👋
-            </h2>
-            <h3 className="mt-1 text-lg font-medium">Welcome back</h3>
-            <p className="mt-1 text-sm text-hub-textDim">Sign in to continue to your campus.</p>
+            <h3 className="text-2xl font-semibold text-white">Welcome back 👋</h3>
+            <p className="mt-1 text-sm text-hub-textDim">Log in to continue to UniHub.</p>
 
             <form onSubmit={handleLogin} className="mt-6 flex flex-col gap-4">
               <Field
-                label="University Email"
+                label="Email or Username"
                 type="email"
                 placeholder="name@university.edu"
                 value={email}
@@ -293,11 +301,21 @@ export default function AuthPage() {
               </button>
             </form>
 
-            <Divider />
+            <Divider label="or continue with" />
 
-            <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-hub-border py-3.5 text-sm font-medium">
-              🏛️ Continue with University SSO
-            </button>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleGoogleAuth}
+                disabled={googleLoading}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-hub-border py-3.5 text-sm font-medium text-white disabled:opacity-60"
+              >
+                <GoogleIcon />
+                {googleLoading ? "Connecting..." : "Continue with Google"}
+              </button>
+              <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-hub-border py-3.5 text-sm font-medium text-white">
+                🏛️ Continue with University SSO
+              </button>
+            </div>
 
             <p className="mt-6 text-center text-sm text-hub-textDim">
               Don&apos;t have an account?{" "}
@@ -308,20 +326,18 @@ export default function AuthPage() {
                   resetSignup();
                 }}
               >
-                Create account
+                Sign up
               </button>
             </p>
           </>
         ) : (
           <>
-            <h2 className="text-2xl font-semibold">
-              Uni<span className="text-hub-accentLight">.hub</span>
-            </h2>
-            <h3 className="mt-1 text-lg font-medium">Create your account</h3>
-            <p className="mt-1 text-sm text-hub-textDim">Step {signupStep} of 4</p>
+            <h3 className="text-2xl font-semibold text-white">Create your account</h3>
+            <p className="mt-1 text-sm text-hub-textDim">Let&apos;s get you all set up.</p>
+            <p className="mt-3 text-xs text-hub-textDim">Step {signupStep} of 4</p>
 
             {signupStep === 1 && (
-              <form onSubmit={handleCreateAccount} className="mt-6 flex flex-col gap-4">
+              <form onSubmit={handleCreateAccount} className="mt-4 flex flex-col gap-4">
                 <div className="flex gap-3">
                   <Field label="First Name" placeholder="Enter first name" value={firstName} onChange={setFirstName} />
                   <Field label="Last Name" placeholder="Enter last name" value={lastName} onChange={setLastName} />
@@ -349,13 +365,33 @@ export default function AuthPage() {
                   disabled={loading}
                   className="mt-2 rounded-xl bg-hub-accent py-3.5 text-center font-medium text-white disabled:opacity-60"
                 >
-                  {loading ? "Sending code..." : "Continue"}
+                  {loading ? "Sending code..." : "Sign Up"}
                 </button>
+
+                <Divider label="or sign up with" />
+
+                <div className="flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={handleGoogleAuth}
+                    disabled={googleLoading}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-hub-border py-3.5 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    <GoogleIcon />
+                    {googleLoading ? "Connecting..." : "Continue with Google"}
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-hub-border py-3.5 text-sm font-medium text-white"
+                  >
+                    🏛️ Continue with University SSO
+                  </button>
+                </div>
               </form>
             )}
 
             {signupStep === 2 && (
-              <form onSubmit={handleVerifyOtp} className="mt-6 flex flex-col gap-4">
+              <form onSubmit={handleVerifyOtp} className="mt-4 flex flex-col gap-4">
                 <p className="text-sm text-hub-textDim">
                   We sent a 6-digit code to <span className="text-white">{signupEmail}</span>. Enter it below to
                   verify your email.
@@ -389,7 +425,7 @@ export default function AuthPage() {
             )}
 
             {signupStep === 3 && (
-              <form onSubmit={goToStep4} className="mt-6 flex flex-col gap-4">
+              <form onSubmit={goToStep4} className="mt-4 flex flex-col gap-4">
                 <Field label="Phone Number" placeholder="080X XXX XXXX" value={phoneNumber} onChange={setPhoneNumber} />
                 <Field label="Date of Birth" type="date" placeholder="" value={dateOfBirth} onChange={setDateOfBirth} />
                 <Field label="Matric Number" placeholder="e.g. 20/1234" value={matricNumber} onChange={setMatricNumber} />
@@ -409,7 +445,7 @@ export default function AuthPage() {
             )}
 
             {signupStep === 4 && (
-              <form onSubmit={handleFinishSignup} className="mt-6 flex flex-col gap-4">
+              <form onSubmit={handleFinishSignup} className="mt-4 flex flex-col gap-4">
                 <ComboField label="Gender" value={gender} onChange={setGender} options={GENDERS} placeholder="e.g. Male" />
                 <Field label="Home Address" placeholder="Enter your home address" value={homeAddress} onChange={setHomeAddress} />
 
@@ -422,7 +458,7 @@ export default function AuthPage() {
                       setSignupStep(3);
                       setError(null);
                     }}
-                    className="flex-1 rounded-xl border border-hub-border py-3.5 text-center font-medium"
+                    className="flex-1 rounded-xl border border-hub-border py-3.5 text-center font-medium text-white"
                   >
                     Back
                   </button>
@@ -453,6 +489,17 @@ export default function AuthPage() {
         )}
       </div>
     </main>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 48 48">
+      <path fill="#EA4335" d="M24 9.5c3.4 0 6.4 1.2 8.8 3.5l6.6-6.6C35.3 2.5 30 0 24 0 14.6 0 6.5 5.4 2.5 13.2l7.7 6C12.1 13 17.6 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.5 3-2.2 5.5-4.7 7.2l7.3 5.7c4.3-4 6.8-9.8 6.8-17.4z" />
+      <path fill="#FBBC05" d="M10.2 19.2A14.5 14.5 0 0 0 9.5 24c0 1.7.3 3.3.7 4.8l-7.7 6A24 24 0 0 1 0 24c0-3.9.9-7.5 2.5-10.8z" />
+      <path fill="#34A853" d="M24 48c6 0 11.3-2 15.1-5.3l-7.3-5.7c-2 1.4-4.6 2.2-7.8 2.2-6.4 0-11.9-3.5-14.1-8.7l-7.7 6C6.5 42.6 14.6 48 24 48z" />
+    </svg>
   );
 }
 
@@ -609,11 +656,11 @@ function PasswordField({
   );
 }
 
-function Divider() {
+function Divider({ label = "or" }: { label?: string }) {
   return (
     <div className="my-5 flex items-center gap-3 text-xs text-hub-textDim">
       <div className="h-px flex-1 bg-hub-border" />
-      or
+      {label}
       <div className="h-px flex-1 bg-hub-border" />
     </div>
   );
