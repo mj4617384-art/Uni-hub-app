@@ -102,9 +102,6 @@ export const SPORTS_CATEGORY_OPTIONS = [
   "Rugby",
 ];
 
-// Real, transparent keyword matching for category suggestion on the
-// composer — no ML model, no fake AI. First category with the most
-// keyword hits wins; ties keep this list's order.
 export const CATEGORY_KEYWORDS: Record<string, string[]> = {
   Sports: [
     "football", "basketball", "match", "game", "tournament", "athletics",
@@ -281,10 +278,6 @@ function MediaLightbox({
   );
 }
 
-// Feed thumbnails now fill edge-to-edge like Facebook/Instagram — object-cover
-// crops overflow instead of letterboxing. Full, uncropped view is still one
-// tap away via the lightbox (which stays object-contain, since a full-screen
-// viewer is exactly where showing the whole file matters).
 export function MediaCarousel({
   images,
   videos,
