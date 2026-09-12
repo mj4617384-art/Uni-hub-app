@@ -581,7 +581,7 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      <BottomNav active="discover" />
+      <BottomNav />
     </main>
   );
 }
