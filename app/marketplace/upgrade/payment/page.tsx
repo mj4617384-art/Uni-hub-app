@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-const PRICE_NAIRA = 3000;
+const PRICE_NAIRA = 1600;
 const PLAN_DAYS = 30;
 const PAYSTACK_PUBLIC_KEY = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "";
 const IS_TEST_MODE = PAYSTACK_PUBLIC_KEY.startsWith("pk_test_");
