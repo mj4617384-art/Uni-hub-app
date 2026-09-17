@@ -49,7 +49,7 @@ export default function UpgradePage() {
 
       <div className="mt-6 text-center">
         <p className="text-2xl font-semibold text-white">
-          ₦3,000 <span className="text-sm font-normal text-hub-textDim">/ 30 days</span>
+          ₦1,600 <span className="text-sm font-normal text-hub-textDim">/ 30 days</span>
         </p>
         <p className="mt-1 text-xs text-hub-textDim">Cancel anytime</p>
       </div>
