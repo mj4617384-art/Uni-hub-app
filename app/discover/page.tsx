@@ -412,6 +412,7 @@ export default function DiscoverPage() {
     const myReaction = postReactions.find((r) => r.user_id === userId)?.type ?? null;
     const allComments = commentsByKey[k] || [];
     const topLevel = allComments.filter((c) => !c.parent_id);
+    const repliesOf = (id: string) => allComments.filter((c) => c.parent_id === id);
     const currentReply = replyTo[k];
     const isMine = post.user_id === userId;
     const isSaved = post.source === "discover" && bookmarkedIds.has(post.id);
@@ -443,7 +444,7 @@ export default function DiscoverPage() {
             </div>
           </div>
           <div ref={(el) => { menuScopeRefs.current[k] = el; }} className="relative">
-            <button onClick={() => setMenuOpenFor(menuOpenFor === k ? null : k)} className="text-white"><MoreIcon /></button>
+            <button onClick={() => setMenuOpenFor(menuOpenFor === k ? null : k)} className="flex h-11 w-11 items-center justify-center text-white"><MoreIcon /></button>
             {menuOpenFor === k && (
               <div className="absolute right-0 top-9 z-30 w-44 rounded-lg border border-hub-border bg-hub-card2 py-1 shadow-lg">
                 <button onClick={() => sharePost(post)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-xs text-white"><ShareIcon />Share</button>
@@ -461,20 +462,20 @@ export default function DiscoverPage() {
           </div>
         </div>
 
-        <div className="absolute bottom-24 right-3 flex flex-col items-center gap-6">
-          <button onClick={() => pickReaction(post, "like")} disabled={reactingKey === k} className="flex flex-col items-center gap-1">
+        <div className="absolute bottom-24 right-2 flex flex-col items-center gap-4">
+          <button onClick={() => pickReaction(post, "like")} disabled={reactingKey === k} className="flex h-11 w-11 flex-col items-center justify-center gap-1 rounded-full">
             <ThumbsUpIcon className={myReaction ? "text-hub-accentLight" : "text-white"} filled={!!myReaction} />
             <span className="text-[13px] font-medium text-white">{postReactions.length > 0 ? postReactions.length : ""}</span>
           </button>
-          <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex flex-col items-center gap-1">
+          <button onClick={() => setCommentOpenFor(commentOpenFor === k ? null : k)} className="flex h-11 w-11 flex-col items-center justify-center gap-1 rounded-full">
             <span className="text-white"><CommentIcon /></span>
             <span className="text-[13px] font-medium text-white">{allComments.length > 0 ? allComments.length : ""}</span>
           </button>
-          <button onClick={() => sharePost(post)} className="flex flex-col items-center gap-1">
+          <button onClick={() => sharePost(post)} className="flex h-11 w-11 flex-col items-center justify-center gap-1 rounded-full">
             <span className="text-white"><ShareIcon /></span>
           </button>
           {post.source === "discover" && (
-            <button onClick={() => toggleBookmark(post)} className="flex flex-col items-center gap-1">
+            <button onClick={() => toggleBookmark(post)} className="flex h-11 w-11 flex-col items-center justify-center gap-1 rounded-full">
               <span className={isSaved ? "text-hub-accentLight" : "text-white"}><BookmarkIcon filled={isSaved} /></span>
             </button>
           )}
@@ -496,14 +497,29 @@ export default function DiscoverPage() {
               <div className="flex flex-col gap-3">
                 {topLevel.length === 0 && <p className="text-xs text-hub-textDim">No comments yet.</p>}
                 {topLevel.map((c) => (
-                  <CommentRow
-                    key={c.id}
-                    comment={c}
-                    liked={!!commentLikes[c.id]?.mine}
-                    likeCount={commentLikes[c.id]?.count ?? 0}
-                    onLike={() => toggleCommentLike(post, c.id)}
-                    onReply={() => startReply(post, c.id, c.first_name || "them")}
-                  />
+                  <div key={c.id}>
+                    <CommentRow
+                      comment={c}
+                      liked={!!commentLikes[c.id]?.mine}
+                      likeCount={commentLikes[c.id]?.count ?? 0}
+                      onLike={() => toggleCommentLike(post, c.id)}
+                      onReply={() => startReply(post, c.id, c.first_name || "them")}
+                    />
+                    {repliesOf(c.id).length > 0 && (
+                      <div className="ml-8 mt-2 flex flex-col gap-2">
+                        {repliesOf(c.id).map((r) => (
+                          <CommentRow
+                            key={r.id}
+                            comment={r}
+                            liked={!!commentLikes[r.id]?.mine}
+                            likeCount={commentLikes[r.id]?.count ?? 0}
+                            onLike={() => toggleCommentLike(post, r.id)}
+                            onReply={() => startReply(post, c.id, c.first_name || "them")}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
               {currentReply && (
